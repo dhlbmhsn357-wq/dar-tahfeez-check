@@ -486,7 +486,11 @@
     <h3>إضافة شهر جديد</h3>
     <input type="text" id="newMonthName" placeholder="اسم الشهر، مثال: شهر ٧">
     <input type="number" id="newMonthSessions" placeholder="عدد الحصص" value="14">
-    <div class="field-label" style="margin-top:0;">سيتم سحب كل أسماء الطلاب الحالية تلقائياً لهذا الشهر</div>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:14px;color:var(--text-secondary,#555);cursor:pointer;">
+      <input type="checkbox" id="newMonthEmpty" style="width:auto;margin:0;">
+      ابدأ بشهر فاضي (بدون سحب أسماء الطلاب تلقائياً)
+    </label>
+    <div class="field-label" style="margin-top:6px;" id="newMonthHint">سيتم سحب كل أسماء الطلاب الحالية تلقائياً لهذا الشهر</div>
     <div class="modal-actions">
       <button class="btn-secondary" onclick="closeModal('modalAddMonth')">إلغاء</button>
       <button class="btn-primary" onclick="submitAddMonth()">إضافة</button>
@@ -926,11 +930,23 @@ function renderMonths(){
 }
 
 function openModal(id){ document.getElementById(id).classList.add('show'); }
+
+document.addEventListener('DOMContentLoaded', () => {
+  const emptyChk = document.getElementById('newMonthEmpty');
+  if(emptyChk){
+    emptyChk.addEventListener('change', () => {
+      document.getElementById('newMonthHint').textContent = emptyChk.checked
+        ? 'الشهر هيتعمل فاضي تماماً، وتقدر تضيف الأسماء بنفسك بعد كده'
+        : 'سيتم سحب كل أسماء الطلاب الحالية تلقائياً لهذا الشهر';
+    });
+  }
+});
 function closeModal(id){ document.getElementById(id).classList.remove('show'); }
 
 async function submitAddMonth(){
   const name = document.getElementById('newMonthName').value.trim();
   const sessions = parseInt(document.getElementById('newMonthSessions').value) || 14;
+  const startEmpty = document.getElementById('newMonthEmpty').checked;
   if(!name){ showToast('من فضلك ادخل اسم الشهر'); return; }
 
   const newMonth = {
@@ -941,24 +957,26 @@ async function submitAddMonth(){
   };
   await writeLocal('months', newMonth, 'insert');
 
-  const rosterData = await idbGetAll('roster');
-  rosterData.sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
+  if(!startEmpty){
+    const rosterData = await idbGetAll('roster');
+    rosterData.sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
 
-  let order = 1;
-  for(const r of rosterData){
-    const studentRow = {
-      id: genId(),
-      month_id: newMonth.id,
-      roster_id: r.id,
-      display_order: order++,
-      name: r.name,
-      parent_phone: r.parent_phone,
-      notes: '',
-      parent_call_status: null,
-      parent_call_notes: '',
-      updated_at: new Date().toISOString()
-    };
-    await writeLocal('students', studentRow, 'insert');
+    let order = 1;
+    for(const r of rosterData){
+      const studentRow = {
+        id: genId(),
+        month_id: newMonth.id,
+        roster_id: r.id,
+        display_order: order++,
+        name: r.name,
+        parent_phone: r.parent_phone,
+        notes: '',
+        parent_call_status: null,
+        parent_call_notes: '',
+        updated_at: new Date().toISOString()
+      };
+      await writeLocal('students', studentRow, 'insert');
+    }
   }
 
   months.push(newMonth);
@@ -966,7 +984,9 @@ async function submitAddMonth(){
   closeModal('modalAddMonth');
   document.getElementById('newMonthName').value = '';
   document.getElementById('newMonthSessions').value = '14';
-  showToast('تم إضافة الشهر وسحب كل الطلاب تلقائياً');
+  document.getElementById('newMonthEmpty').checked = false;
+  document.getElementById('newMonthHint').textContent = 'سيتم سحب كل أسماء الطلاب الحالية تلقائياً لهذا الشهر';
+  showToast(startEmpty ? 'تم إضافة شهر فاضي' : 'تم إضافة الشهر وسحب كل الطلاب تلقائياً');
 }
 
 /* ============================================
@@ -1175,6 +1195,7 @@ function renderStudentBody(student){
     <textarea id="call-${student.id}" placeholder="ملاحظات المكالمة (اختياري)" onblur="saveCallNotes('${student.id}')">${escapeHtml(student.parent_call_notes || '')}</textarea>
 
     <div class="save-row">
+      <button class="btn-secondary" onclick="confirmRemoveFromMonth('${student.id}', '${escapeAttr(student.name)}')" style="margin-bottom:8px;">حذف من هذا الشهر فقط</button>
       <button class="btn-danger" onclick="confirmDeleteStudent('${student.id}', '${student.roster_id}', '${escapeAttr(student.name)}')">حذف الطالب نهائياً من كل الشهور</button>
     </div>
   `;
@@ -1316,6 +1337,28 @@ async function submitAddStudent(){
   closeModal('modalAddStudent');
   renderStudents();
   showToast('تم إضافة الطالب، وسيظهر تلقائياً في الشهور القادمة');
+}
+
+function confirmRemoveFromMonth(studentId, name){
+  document.getElementById('confirmText').textContent = `هل تريد حذف الطالب "${name}" من هذا الشهر فقط؟ سيبقى موجوداً في باقي الشهور ببياناته كاملة.`;
+  const btn = document.getElementById('confirmActionBtn');
+  btn.onclick = async () => {
+    const allRecords = await idbGetAll('session_records');
+    for(const rec of allRecords){
+      if(rec.student_id === studentId) await idbDelete('session_records', rec.id);
+    }
+    await idbAddToQueue({ table: 'session_records', action: 'delete_by', payload: { column: 'student_id', value: studentId } });
+
+    await deleteLocal('students', studentId);
+
+    students = students.filter(s => s.id !== studentId);
+    delete records[studentId];
+    if(openStudentId === studentId) openStudentId = null;
+    closeModal('modalConfirm');
+    renderStudents();
+    showToast('تم حذف الطالب من هذا الشهر فقط');
+  };
+  openModal('modalConfirm');
 }
 
 function confirmDeleteStudent(studentId, rosterId, name){
