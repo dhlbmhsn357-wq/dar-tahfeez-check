@@ -339,6 +339,10 @@
   .phone-row button{
     padding:12px 14px;background:var(--gold);color:#fff;font-size:13px;font-weight:600;white-space:nowrap;
   }
+  .btn-whatsapp{
+    padding:12px !important;background:#25D366 !important;color:#fff;display:flex;align-items:center;justify-content:center;
+    flex-shrink:0;border-radius:10px;
+  }
 
   .toast{
     position:fixed;bottom:calc(24px + var(--safe-bottom));left:50%;transform:translateX(-50%);
@@ -1182,6 +1186,9 @@ function renderStudentBody(student){
     <div class="phone-row">
       <input type="text" id="phone-${student.id}" value="${escapeAttr(student.parent_phone || '')}" placeholder="رقم الهاتف">
       <button onclick="savePhone('${student.id}')">حفظ</button>
+      ${student.parent_phone ? `<button class="btn-whatsapp" onclick="openWhatsApp('${student.id}')" title="إرسال رسالة واتساب">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.46 1.32 4.96L2.05 22l5.25-1.38a9.9 9.9 0 004.74 1.21h.004c5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0012.04 2m0 1.67a8.2 8.2 0 018.24 8.24c0 4.55-3.7 8.25-8.25 8.25a8.2 8.2 0 01-4.19-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.18 8.18 0 01-1.26-4.38c0-4.55 3.7-8.25 8.25-8.25M8.53 6.83c-.16 0-.43.06-.66.31s-.87.86-.87 2.1.9 2.42 1.02 2.6c.12.16 1.75 2.85 4.32 3.87 2.13.85 2.57.68 3.03.64.46-.04 1.5-.61 1.7-1.2.2-.6.2-1.11.14-1.22-.06-.1-.23-.16-.48-.28-.25-.13-1.5-.74-1.73-.82-.23-.09-.4-.13-.57.13-.16.25-.65.82-.8 1-.15.16-.3.18-.55.06-.25-.13-1.07-.4-2.03-1.26-.75-.67-1.26-1.5-1.4-1.75-.15-.25-.02-.39.11-.51.11-.11.25-.3.37-.44.12-.15.16-.25.24-.42.08-.16.04-.31-.02-.44-.06-.13-.57-1.4-.79-1.9-.2-.5-.42-.42-.57-.43z"/></svg>
+      </button>` : ''}
     </div>
 
     <div class="field-label">ملاحظات الشيخ عن الطالب</div>
@@ -1263,6 +1270,66 @@ async function saveNotes(studentId){
   const val = document.getElementById(`notes-${studentId}`).value;
   await updateStudentField(studentId, { notes: val });
   showToast('تم الحفظ ✓');
+}
+
+function normalizeEgyptPhone(raw){
+  let digits = (raw || '').replace(/[^\d]/g, '');
+  digits = digits.replace(/^0+/, '');
+  if(digits.startsWith('20')) return digits;
+  if(digits.startsWith('1') && digits.length === 10) return '20' + digits;
+  return digits;
+}
+
+function buildWhatsAppMessage(student){
+  const studentRecords = records[student.id] || {};
+  let hifz = 0, weak = 0, absentMem = 0;
+  let present = 0, absent = 0, firstDay = 0;
+
+  for(let sn = 1; sn <= currentMonth.sessions_count; sn++){
+    const r = studentRecords[sn] || {};
+    if(r.attendance === 'حضر') present++;
+    else if(r.attendance === 'محضرش') absent++;
+    else if(r.attendance === 'أول يوم') firstDay++;
+
+    if(r.memorization === 'حفظ') hifz++;
+    else if(r.memorization === 'حفظ ضعيف') weak++;
+    else if(r.memorization === 'محفظش') absentMem++;
+  }
+
+  const lines = [];
+  lines.push(`السلام عليكم ورحمة الله وبركاته`);
+  lines.push(``);
+  lines.push(`نفيدكم بملخص متابعة الطالب/ة "${student.name}" خلال ${currentMonth.name} في دار الأرقم لتحفيظ القرآن الكريم:`);
+  lines.push(``);
+  lines.push(`📌 الحضور: ${present} حصة حضور، ${absent} غياب${firstDay ? `، ${firstDay} أول يوم` : ''}`);
+  lines.push(`📖 الحفظ: ${hifz} حصة حفظ جيد${weak ? `، ${weak} حفظ ضعيف` : ''}${absentMem ? `، ${absentMem} لم يحفظ` : ''}`);
+
+  if(student.notes && student.notes.trim()){
+    lines.push(``);
+    lines.push(`📝 ملاحظات الشيخ:`);
+    lines.push(student.notes.trim());
+  }
+
+  lines.push(``);
+  lines.push(`نرجو المتابعة معه في المنزل، وجزاكم الله خيراً.`);
+
+  return lines.join('\n');
+}
+
+function openWhatsApp(studentId){
+  const student = students.find(s => s.id === studentId);
+  if(!student || !student.parent_phone){
+    showToast('من فضلك احفظ رقم الهاتف أولاً');
+    return;
+  }
+  const phone = normalizeEgyptPhone(student.parent_phone);
+  if(phone.length < 10){
+    showToast('رقم الهاتف غير صالح');
+    return;
+  }
+  const message = buildWhatsAppMessage(student);
+  const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+  window.open(url, '_blank');
 }
 
 async function savePhone(studentId){
