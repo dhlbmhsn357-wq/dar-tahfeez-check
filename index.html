@@ -178,10 +178,13 @@
   /* ===== Tabs (students / summary) ===== */
   .tabs{
     display:flex;gap:8px;margin-bottom:16px;border-bottom:1.5px solid var(--line);
+    overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;
   }
+  .tabs::-webkit-scrollbar{display:none;}
   .tab-btn{
-    background:none;padding:10px 18px;font-size:14px;color:var(--muted);
+    background:none;padding:10px 16px;font-size:13.5px;color:var(--muted);
     border-bottom:3px solid transparent;font-weight:600;border-radius:0;
+    flex-shrink:0;white-space:nowrap;
   }
   .tab-btn.active{color:var(--gold-deep);border-bottom-color:var(--gold);}
 
@@ -255,19 +258,20 @@
   }
   .student-head{
     display:flex;align-items:center;justify-content:space-between;
-    padding:14px 16px;
+    padding:14px 16px;gap:8px;
     cursor:pointer;
   }
-  .student-head .who{display:flex;align-items:center;gap:10px;}
+  .student-head .who{display:flex;align-items:center;gap:10px;min-width:0;flex:1;}
   .student-num{
     width:30px;height:30px;border-radius:50%;
     background:var(--green-bg);color:var(--green);
     display:flex;align-items:center;justify-content:center;
     font-size:13px;font-weight:700;flex-shrink:0;
   }
-  .student-head h4{margin:0;font-size:15px;}
-  .student-head .phone{font-size:12px;color:var(--muted);margin-top:2px;}
-  .chev{color:var(--muted);transition:transform .15s;font-size:18px;}
+  .student-head .who > div{min-width:0;}
+  .student-head h4{margin:0;font-size:15px;word-break:break-word;}
+  .student-head .phone{font-size:12px;color:var(--muted);margin-top:2px;word-break:break-word;}
+  .chev{color:var(--muted);transition:transform .15s;font-size:18px;flex-shrink:0;}
   .student-card.open .chev{transform:rotate(180deg);}
 
   .student-progress{
@@ -334,18 +338,20 @@
   }
   .btn-danger:hover{background:var(--red);color:#fff;}
 
-  .phone-row{display:flex;gap:8px;align-items:flex-end;}
-  .phone-row input{margin-bottom:0;flex:1;}
+  .phone-row{display:flex;flex-direction:column;gap:8px;}
+  .phone-row input{margin-bottom:0;width:100%;font-size:15px;}
+  .phone-actions-row{display:flex;gap:8px;flex-wrap:wrap;}
+  .phone-actions-row button, .phone-actions-row a{flex:1;min-width:70px;}
   .phone-row button{
     padding:12px 14px;background:var(--gold);color:#fff;font-size:13px;font-weight:600;white-space:nowrap;
   }
   .btn-whatsapp{
     padding:12px !important;background:#25D366 !important;color:#fff;display:flex;align-items:center;justify-content:center;
-    flex-shrink:0;border-radius:10px;
+    border-radius:10px;
   }
   .btn-call, .btn-copy{
     padding:12px !important;font-size:16px;display:flex;align-items:center;justify-content:center;
-    flex-shrink:0;border-radius:10px;background:var(--amber-bg);color:var(--gold-deep);
+    border-radius:10px;background:var(--amber-bg);color:var(--gold-deep);
     text-decoration:none;border:1px solid var(--line);
   }
 
@@ -418,7 +424,7 @@
   }
   .rc-label{font-size:12.5px;font-weight:700;opacity:0.85;margin-bottom:6px;}
   .rc-value{font-size:30px;font-weight:900;line-height:1;margin-bottom:6px;}
-  .rc-fraction{font-size:12px;opacity:0.7;font-weight:600;}
+  .rc-fraction{font-size:11.5px;opacity:0.7;font-weight:600;word-break:break-word;line-height:1.4;}
 
   .report-card.gold{background:linear-gradient(135deg,#fdf6e3,#f7e7c1);}
   .report-card.gold .rc-value{color:var(--gold-deep,#8a6a1f);}
@@ -442,6 +448,28 @@
   .alert-title{font-size:13.5px;font-weight:800;margin-bottom:4px;}
   .alert-body{font-size:12.5px;color:var(--muted);line-height:1.6;}
 
+  /* ===== Collapsible report sections (التواصل / الغياب المرتفع) ===== */
+  .report-alert-collapsible{
+    background:var(--red-bg,#fdeaea);border-right:4px solid var(--red,#c0392b);
+    border-radius:12px;overflow:hidden;
+  }
+  .report-alert-toggle{
+    width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:12px 14px;background:none;border:none;text-align:right;cursor:pointer;
+  }
+  .alert-toggle-main{flex:1;min-width:0;}
+  .alert-sub{font-size:12px;color:var(--muted);margin-top:2px;}
+  .alert-toggle-arrow{font-size:12px;font-weight:700;color:var(--red);white-space:nowrap;flex-shrink:0;}
+  .report-alert-body{
+    padding:0 14px 12px;display:flex;flex-direction:column;gap:6px;
+    max-height:280px;overflow-y:auto;
+  }
+  .report-name-row{
+    background:#fff;border-radius:8px;padding:8px 10px;font-size:13px;
+    display:flex;align-items:center;justify-content:space-between;gap:8px;
+  }
+  .report-name-sub{font-size:11.5px;color:var(--muted);white-space:nowrap;}
+
   .tab-btn{white-space:nowrap;}
 
   /* ===== Todo / Inbox page ===== */
@@ -462,6 +490,37 @@
     background:#fff;font-size:13px;font-weight:600;color:var(--muted);white-space:nowrap;
   }
   .chip.active{background:var(--gold);border-color:var(--gold);color:#fff;}
+
+  /* ===== Session-level chips (تسجيل ناقص) ===== */
+  .todo-session-chips{
+    display:flex;gap:6px;overflow-x:auto;margin-bottom:14px;padding-bottom:6px;
+    -webkit-overflow-scrolling:touch;
+  }
+  .session-chip{
+    flex-shrink:0;padding:8px 12px;border-radius:10px;border:1.5px solid var(--line);
+    background:#fff;font-size:12.5px;font-weight:600;color:var(--muted);white-space:nowrap;
+    display:flex;align-items:center;gap:5px;
+  }
+  .session-chip.has-issues{border-color:var(--amber);color:var(--gold-deep);}
+  .session-chip.active{background:var(--gold);border-color:var(--gold);color:#fff;}
+  .session-chip.active .session-chip-count{background:rgba(255,255,255,0.3);color:#fff;}
+  .session-chip-count{
+    background:var(--amber-bg);color:var(--gold-deep);border-radius:10px;
+    font-size:10.5px;font-weight:800;padding:1px 6px;min-width:16px;text-align:center;
+  }
+
+  /* ===== Overview cards (فلتر "الكل") ===== */
+  .todo-overview-list{display:flex;flex-direction:column;gap:10px;}
+  .todo-overview-card{
+    background:var(--paper);border:1px solid var(--line);border-radius:12px;
+    padding:14px 16px;display:flex;align-items:center;justify-content:space-between;
+    box-shadow:var(--shadow);cursor:pointer;
+  }
+  .todo-overview-card.urgent{border-color:var(--red);background:var(--red-bg);}
+  .todo-overview-title{font-size:14px;font-weight:800;color:var(--gold-deep);margin-bottom:3px;}
+  .todo-overview-card.urgent .todo-overview-title{color:var(--red);}
+  .todo-overview-sub{font-size:12.5px;color:var(--muted);}
+  .todo-overview-arrow{font-size:22px;color:var(--muted);flex-shrink:0;}
 
   .todo-list{display:flex;flex-direction:column;gap:10px;}
   .todo-row{
@@ -497,6 +556,18 @@
   @media (max-width:380px){
     .report-grid{grid-template-columns:1fr 1fr;}
     .rc-value{font-size:26px;}
+  }
+
+  @media (max-width:340px){
+    .container{padding:10px;}
+    .report-card{padding:12px 10px;}
+    .rc-value{font-size:22px;}
+    .rc-label{font-size:11.5px;}
+    .rc-fraction{font-size:10.5px;}
+    .report-header-title{font-size:17px;}
+    .modal-box{padding:18px;}
+    .todo-header-title{font-size:14px;}
+    .session-chip{padding:7px 10px;font-size:11.5px;}
   }
 
   /* ===== Install prompt ===== */
@@ -784,12 +855,22 @@ window.addEventListener('offline', () => {
    معالجة قائمة المزامنة المعلقة
    ============================================ */
 async function processSyncQueue(){
-  if(isSyncing || !isOnline) return;
+  if(!isOnline) return false;
+
+  // لو فيه مزامنة شغالة فعلاً، ننتظرها بدل ما نرجع فوراً ونضيع نتيجة العملية الحالية
+  if(isSyncing){
+    while(isSyncing){
+      await new Promise(r => setTimeout(r, 150));
+    }
+  }
+
   const queue = await idbGetAll('sync_queue');
-  if(queue.length === 0) return;
+  if(queue.length === 0) return true;
 
   isSyncing = true;
   updateConnectionUI();
+
+  let allSucceeded = true;
 
   // ترتيب حسب وقت الإنشاء لضمان التتابع الصحيح
   queue.sort((a,b) => a.createdAt - b.createdAt);
@@ -812,6 +893,7 @@ async function processSyncQueue(){
       if(result && result.error){
         console.error('Sync error for op', op, result.error);
         // نكمل لباقي العمليات، ونسيب العملية الفاشلة في الطابور لإعادة المحاولة لاحقاً
+        allSucceeded = false;
         continue;
       }
 
@@ -822,25 +904,44 @@ async function processSyncQueue(){
       // مشكلة في الشبكة وقت المزامنة - نوقف ونحاول تاني لما النت يرجع فعلياً
       isSyncing = false;
       updateConnectionUI();
-      return;
+      return false;
     }
   }
 
   isSyncing = false;
   updateConnectionUI();
-  showToast('تمت مزامنة كل البيانات مع السحابة ✓');
 
-  // بعد المزامنة الناجحة، نعيد تحميل البيانات الطازجة من السحابة
-  await refreshFromCloud();
+  if(allSucceeded){
+    // بعد المزامنة الناجحة الكاملة، نعيد تحميل البيانات الطازجة من السحابة
+    await refreshFromCloud();
+  }
+
+  return allSucceeded;
 }
 
 /* ============================================
    تحميل كل البيانات من السحابة وتخزينها محلياً
    (يُستخدم عند فتح التطبيق وفيه نت، أو بعد نجاح المزامنة)
+
+   مهم جداً: لا نكتب فوق أي صف له تعديل محلي لم يُرفع بعد (موجود في sync_queue)،
+   وإلا فقدنا التعديلات الحديثة عند سحب نسخة أقدم من السحابة.
    ============================================ */
 async function refreshFromCloud(){
   if(!isOnline) return;
   try{
+    // نجمع كل المفاتيح المحلية التي لها تعديلات معلقة لم تُرفع بعد
+    const pendingQueue = await idbGetAll('sync_queue');
+    const pendingKeys = {}; // { tableName: Set of record ids }
+    for(const op of pendingQueue){
+      if(!pendingKeys[op.table]) pendingKeys[op.table] = new Set();
+      const recId = op.payload && op.payload.id;
+      if(recId) pendingKeys[op.table].add(recId);
+    }
+
+    const skipIfPending = (tableName, row) => {
+      return pendingKeys[tableName] && row && row.id && pendingKeys[tableName].has(row.id);
+    };
+
     const [rosterRes, monthsRes, studentsRes, recordsRes, summaryRes] = await Promise.all([
       sb.from('roster').select('*'),
       sb.from('months').select('*'),
@@ -849,11 +950,11 @@ async function refreshFromCloud(){
       sb.from('month_summary').select('*')
     ]);
 
-    if(rosterRes.data) for(const r of rosterRes.data) await idbPut('roster', r);
-    if(monthsRes.data) for(const m of monthsRes.data) await idbPut('months', m);
-    if(studentsRes.data) for(const s of studentsRes.data) await idbPut('students', s);
-    if(recordsRes.data) for(const r of recordsRes.data) await idbPut('session_records', r);
-    if(summaryRes.data) for(const sm of summaryRes.data) await idbPut('month_summary', sm);
+    if(rosterRes.data) for(const r of rosterRes.data) if(!skipIfPending('roster', r)) await idbPut('roster', r);
+    if(monthsRes.data) for(const m of monthsRes.data) if(!skipIfPending('months', m)) await idbPut('months', m);
+    if(studentsRes.data) for(const s of studentsRes.data) if(!skipIfPending('students', s)) await idbPut('students', s);
+    if(recordsRes.data) for(const r of recordsRes.data) if(!skipIfPending('session_records', r)) await idbPut('session_records', r);
+    if(summaryRes.data) for(const sm of summaryRes.data) if(!skipIfPending('month_summary', sm)) await idbPut('month_summary', sm);
   } catch(err){
     console.error('Error refreshing from cloud', err);
   }
@@ -878,7 +979,12 @@ function genId(){
 async function writeLocal(table, record, action='upsert', conflictKey=null){
   await idbPut(table, record);
   await idbAddToQueue({ table, action, payload: record, conflictKey });
-  if(isOnline) processSyncQueue();
+
+  if(isOnline){
+    const synced = await processSyncQueue();
+    return { savedLocally: true, syncedNow: !!synced };
+  }
+  return { savedLocally: true, syncedNow: false };
 }
 
 async function deleteLocal(table, id){
@@ -911,12 +1017,8 @@ let activeTab = 'students';
 let summaryData = null;
 
 const SUMMARY_FIELDS = [
-  { key: 'sheikh_attendance', label: 'حضورك مع الشيخ والمتابعة',
-    options: ['يحضر كل الأيام ويتابع', 'يحضر معظم الأيام', 'يحضر نادراً', 'لم يحضر'] },
   { key: 'memorization_rate', label: 'نسبة الحفظ',
     options: ['المعظم حفظه كويس', 'المعظم حفظه متوسط', 'المعظم حفظه ضعيف'] },
-  { key: 'attendance_rate', label: 'نسبة الحضور',
-    options: ['المعظم يحضر في معاده', 'المعظم يتأخر', 'المعظم يغيب كتير'] },
   { key: 'appreciation', label: 'الإكرام',
     options: ['الإكرام كل الأيام', 'الإكرام مكنش كل الأيام', 'لم يُكرَّم'] },
   { key: 'behavior_change', label: 'نسبة التغيير في سلوك الطلبة',
@@ -1171,8 +1273,11 @@ function goToMonths(){
   document.getElementById('monthsView').style.display = 'block';
 }
 
+let tabSwitchToken = 0;
+
 function switchTab(tab){
   activeTab = tab;
+  const myToken = ++tabSwitchToken;
   document.getElementById('tabStudentsBtn').classList.toggle('active', tab === 'students');
   document.getElementById('tabTodoBtn').classList.toggle('active', tab === 'todo');
   document.getElementById('tabSummaryBtn').classList.toggle('active', tab === 'summary');
@@ -1188,6 +1293,8 @@ function switchTab(tab){
   if(tab === 'report'){
     (async () => {
       const allSummaries = await idbGetAll('month_summary');
+      // نتأكد أن المستخدم لم يبدّل التبويب أثناء التحميل حتى لا نكتب بيانات قديمة فوق تبويب آخر
+      if(myToken !== tabSwitchToken) return;
       summaryData = allSummaries.find(s => s.month_id === currentMonth.id) || { id: genId(), month_id: currentMonth.id };
       renderReport();
     })();
@@ -1321,13 +1428,15 @@ function renderStudentBody(student){
     <div class="field-label">رقم هاتف ولي الأمر</div>
     <div class="phone-row">
       <input type="text" id="phone-${student.id}" value="${escapeAttr(student.parent_phone || '')}" placeholder="رقم الهاتف">
-      <button onclick="savePhone('${student.id}')">حفظ</button>
-      ${student.parent_phone ? `
-      <a class="btn-call" href="tel:${escapeAttr(student.parent_phone)}" title="اتصال">📞</a>
-      <button class="btn-copy" onclick="copyPhoneNumber('${escapeAttr(student.parent_phone)}')" title="نسخ الرقم">📋</button>
-      <button class="btn-whatsapp" onclick="openWhatsApp('${student.id}')" title="إرسال رسالة واتساب">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.46 1.32 4.96L2.05 22l5.25-1.38a9.9 9.9 0 004.74 1.21h.004c5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0012.04 2m0 1.67a8.2 8.2 0 018.24 8.24c0 4.55-3.7 8.25-8.25 8.25a8.2 8.2 0 01-4.19-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.18 8.18 0 01-1.26-4.38c0-4.55 3.7-8.25 8.25-8.25M8.53 6.83c-.16 0-.43.06-.66.31s-.87.86-.87 2.1.9 2.42 1.02 2.6c.12.16 1.75 2.85 4.32 3.87 2.13.85 2.57.68 3.03.64.46-.04 1.5-.61 1.7-1.2.2-.6.2-1.11.14-1.22-.06-.1-.23-.16-.48-.28-.25-.13-1.5-.74-1.73-.82-.23-.09-.4-.13-.57.13-.16.25-.65.82-.8 1-.15.16-.3.18-.55.06-.25-.13-1.07-.4-2.03-1.26-.75-.67-1.26-1.5-1.4-1.75-.15-.25-.02-.39.11-.51.11-.11.25-.3.37-.44.12-.15.16-.25.24-.42.08-.16.04-.31-.02-.44-.06-.13-.57-1.4-.79-1.9-.2-.5-.42-.42-.57-.43z"/></svg>
-      </button>` : ''}
+      <div class="phone-actions-row">
+        <button onclick="savePhone('${student.id}')">حفظ</button>
+        ${student.parent_phone ? `
+        <a class="btn-call" href="tel:${escapeAttr(student.parent_phone)}" title="اتصال">📞</a>
+        <button class="btn-copy" onclick="copyPhoneNumber('${escapeAttr(student.parent_phone)}')" title="نسخ الرقم">📋</button>
+        <button class="btn-whatsapp" onclick="openWhatsApp('${student.id}')" title="إرسال رسالة واتساب">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.46 1.32 4.96L2.05 22l5.25-1.38a9.9 9.9 0 004.74 1.21h.004c5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0012.04 2m0 1.67a8.2 8.2 0 018.24 8.24c0 4.55-3.7 8.25-8.25 8.25a8.2 8.2 0 01-4.19-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.18 8.18 0 01-1.26-4.38c0-4.55 3.7-8.25 8.25-8.25M8.53 6.83c-.16 0-.43.06-.66.31s-.87.86-.87 2.1.9 2.42 1.02 2.6c.12.16 1.75 2.85 4.32 3.87 2.13.85 2.57.68 3.03.64.46-.04 1.5-.61 1.7-1.2.2-.6.2-1.11.14-1.22-.06-.1-.23-.16-.48-.28-.25-.13-1.5-.74-1.73-.82-.23-.09-.4-.13-.57.13-.16.25-.65.82-.8 1-.15.16-.3.18-.55.06-.25-.13-1.07-.4-2.03-1.26-.75-.67-1.26-1.5-1.4-1.75-.15-.25-.02-.39.11-.51.11-.11.25-.3.37-.44.12-.15.16-.25.24-.42.08-.16.04-.31-.02-.44-.06-.13-.57-1.4-.79-1.9-.2-.5-.42-.42-.57-.43z"/></svg>
+        </button>` : ''}
+      </div>
     </div>
 
     <div class="field-label">ملاحظات الشيخ عن الطالب</div>
@@ -1375,6 +1484,21 @@ async function setMemorization(studentId, sessionNumber, value){
   renderStudentBody(student);
 }
 
+/* ============================================
+   إظهار نتيجة الحفظ الحقيقية للمستخدم
+   ============================================ */
+function reportSaveResult(result){
+  if(!isOnline){
+    showToast('تم الحفظ محلياً، سيُرفع عند توفر النت');
+    return;
+  }
+  if(result && result.syncedNow){
+    showToast('تم الحفظ ✓');
+  } else {
+    showToast('تعذر الحفظ في السحابة — البيانات محفوظة على جهازك وسيُعاد المحاولة تلقائياً');
+  }
+}
+
 async function persistRecord(studentId, sessionNumber){
   const rec = records[studentId][sessionNumber];
 
@@ -1390,8 +1514,8 @@ async function persistRecord(studentId, sessionNumber){
     updated_at: new Date().toISOString()
   };
 
-  await writeLocal('session_records', recordRow, 'upsert', 'student_id,session_number');
-  showToast(isOnline ? 'تم الحفظ ✓' : 'تم الحفظ محلياً، سيُرفع عند توفر النت');
+  const result = await writeLocal('session_records', recordRow, 'upsert', 'student_id,session_number');
+  reportSaveResult(result);
 }
 
 /* ============================================
@@ -1399,16 +1523,16 @@ async function persistRecord(studentId, sessionNumber){
    ============================================ */
 async function updateStudentField(studentId, fields){
   const student = students.find(s => s.id === studentId);
-  if(!student) return;
+  if(!student) return null;
   Object.assign(student, fields);
   student.updated_at = new Date().toISOString();
-  await writeLocal('students', student, 'upsert', 'id');
+  return await writeLocal('students', student, 'upsert', 'id');
 }
 
 async function saveNotes(studentId){
   const val = document.getElementById(`notes-${studentId}`).value;
-  await updateStudentField(studentId, { notes: val });
-  showToast('تم الحفظ ✓');
+  const result = await updateStudentField(studentId, { notes: val });
+  reportSaveResult(result);
 }
 
 function normalizeEgyptPhone(raw){
@@ -1481,7 +1605,7 @@ function copyPhoneNumber(phone){
 
 async function savePhone(studentId){
   const val = document.getElementById(`phone-${studentId}`).value.trim();
-  await updateStudentField(studentId, { parent_phone: val });
+  const result = await updateStudentField(studentId, { parent_phone: val });
 
   const student = students.find(s => s.id === studentId);
   if(student && student.roster_id){
@@ -1493,20 +1617,26 @@ async function savePhone(studentId){
     }
   }
   renderStudents();
-  showToast('تم تحديث رقم الهاتف ✓ (سينعكس في الشهور القادمة)');
+  if(!isOnline){
+    showToast('تم الحفظ محلياً، سيُرفع عند توفر النت');
+  } else if(result && result.syncedNow){
+    showToast('تم تحديث رقم الهاتف ✓ (سينعكس في الشهور القادمة)');
+  } else {
+    showToast('تعذر الحفظ في السحابة — سيُعاد المحاولة تلقائياً');
+  }
 }
 
 async function setCallStatus(studentId, status){
-  await updateStudentField(studentId, { parent_call_status: status });
+  const result = await updateStudentField(studentId, { parent_call_status: status });
   const student = students.find(s => s.id === studentId);
   renderStudentBody(student);
-  showToast('تم الحفظ ✓');
+  reportSaveResult(result);
 }
 
 async function saveCallNotes(studentId){
   const val = document.getElementById(`call-${studentId}`).value;
-  await updateStudentField(studentId, { parent_call_notes: val });
-  showToast('تم الحفظ ✓');
+  const result = await updateStudentField(studentId, { parent_call_notes: val });
+  reportSaveResult(result);
 }
 
 /* ============================================
@@ -1597,17 +1727,8 @@ function confirmDeleteStudent(studentId, rosterId, name){
    ============================================ */
 function buildTodoItems(){
   const totalSessions = currentMonth.sessions_count || 0;
-  const items = { today: [], old: [], missingData: [], contact: [] };
-
-  // آخر حصة فيها أي تسجيل (نعتبرها "اليوم" لأنه مفيش تاريخ فعلي مرتبط بكل حصة)
-  let lastActiveSession = 0;
-  students.forEach(s => {
-    const rec = records[s.id] || {};
-    for(let sn = 1; sn <= totalSessions; sn++){
-      if(rec[sn] && (rec[sn].attendance || rec[sn].memorization)) lastActiveSession = Math.max(lastActiveSession, sn);
-    }
-  });
-  if(lastActiveSession === 0) lastActiveSession = 1;
+  const items = { bySession: {}, missingData: [], contact: [] };
+  for(let sn = 1; sn <= totalSessions; sn++) items.bySession[sn] = [];
 
   students.forEach(s => {
     const rec = records[s.id] || {};
@@ -1622,25 +1743,23 @@ function buildTodoItems(){
       });
     }
 
-    // تسجيلات ناقصة لكل حصة
+    // تسجيلات ناقصة لكل حصة - مجمّعة حسب رقم الحصة
     for(let sn = 1; sn <= totalSessions; sn++){
       const r = rec[sn] || {};
       let issue = null;
       if(!r.attendance){
         issue = 'الحضور غير مسجل';
       } else if(r.attendance === 'حضر' && !r.memorization){
-        issue = 'مستوى الحفظ غير مسجل';
+        issue = 'الحضور مسجل — مستوى الحفظ غير مسجل';
       }
       if(issue){
-        const entry = {
+        items.bySession[sn].push({
           type: 'session',
           studentId: s.id,
           sessionNumber: sn,
           name: s.name,
-          label: `الحصة ${sn} — ${issue}`
-        };
-        if(sn === lastActiveSession) items.today.push(entry);
-        else items.old.push(entry);
+          label: issue
+        });
       }
     }
 
@@ -1650,7 +1769,7 @@ function buildTodoItems(){
         type: 'contact',
         studentId: s.id,
         name: s.name,
-        label: s.parent_call_status === 'لم يتم الرد' ? 'تمت محاولة التواصل ولم يرد' : 'لم يتم التواصل مع ولي الأمر هذا الشهر',
+        label: s.parent_call_status === 'لم يتم الرد' ? 'تمت محاولة التواصل — لم يتم الرد' : 'لم يتم التواصل مع ولي الأمر هذا الشهر',
         attempted: s.parent_call_status === 'لم يتم الرد'
       });
     }
@@ -1666,31 +1785,19 @@ function daysLeftInMonth(){
 }
 
 let todoFilter = 'all';
+let todoSelectedSession = null; // رقم الحصة المختارة داخل فلتر "تسجيل ناقص"
+
+function totalSessionIssuesCount(items){
+  return Object.values(items.bySession).reduce((sum, arr) => sum + arr.length, 0);
+}
 
 function renderTodo(){
   const view = document.getElementById('todoView');
   const items = buildTodoItems();
-  const totalCount = items.today.length + items.old.length + items.missingData.length + items.contact.length;
+  const sessionIssuesCount = totalSessionIssuesCount(items);
+  const totalCount = sessionIssuesCount + items.missingData.length + items.contact.length;
 
   const urgentContact = daysLeftInMonth() <= 5 && items.contact.length > 0;
-
-  // ترتيب الأولوية: اليوم -> القديم -> بيانات ناقصة -> تواصل (أو تواصل أولاً لو قرب نهاية الشهر)
-  let ordered = [];
-  if(todoFilter === 'all' || todoFilter === 'sessions'){
-    ordered = ordered.concat(items.today.map(i => ({...i, group:'today'})));
-    if(todoFilter === 'all' && urgentContact){
-      ordered = ordered.concat(items.contact.map(i => ({...i, group:'contact'})));
-    }
-    ordered = ordered.concat(items.old.map(i => ({...i, group:'old'})));
-  }
-  if(todoFilter === 'all' || todoFilter === 'data'){
-    ordered = ordered.concat(items.missingData.map(i => ({...i, group:'data'})));
-  }
-  if(todoFilter === 'all' || todoFilter === 'contact'){
-    if(!(todoFilter === 'all' && urgentContact)){
-      ordered = ordered.concat(items.contact.map(i => ({...i, group:'contact'})));
-    }
-  }
 
   let html = `
     <div class="todo-header">
@@ -1707,27 +1814,124 @@ function renderTodo(){
     </div>
   `;
 
-  if(ordered.length === 0){
-    html += `
+  if(todoFilter === 'sessions'){
+    html += renderSessionsFilterView(items);
+  } else if(todoFilter === 'data'){
+    html += renderSimpleList(items.missingData, 'لا توجد بيانات ناقصة حالياً ✓');
+  } else if(todoFilter === 'contact'){
+    html += renderSimpleList(items.contact, 'تم التواصل مع جميع أولياء الأمور هذا الشهر ✓');
+  } else {
+    // "الكل": ملخص مختصر لكل فئة بدل سرد كل الحالات دفعة واحدة
+    html += renderAllOverview(items, sessionIssuesCount, urgentContact);
+  }
+
+  view.innerHTML = html;
+}
+
+function renderAllOverview(items, sessionIssuesCount, urgentContact){
+  const parts = [];
+
+  if(sessionIssuesCount > 0){
+    parts.push(`
+      <div class="todo-overview-card" onclick="setTodoFilter('sessions')">
+        <div class="todo-overview-main">
+          <div class="todo-overview-title">تسجيل ناقص</div>
+          <div class="todo-overview-sub">${sessionIssuesCount} حالة عبر الحصص</div>
+        </div>
+        <div class="todo-overview-arrow">›</div>
+      </div>
+    `);
+  }
+  if(items.missingData.length > 0){
+    parts.push(`
+      <div class="todo-overview-card" onclick="setTodoFilter('data')">
+        <div class="todo-overview-main">
+          <div class="todo-overview-title">بيانات ناقصة</div>
+          <div class="todo-overview-sub">${items.missingData.length} طالب بدون رقم ولي أمر</div>
+        </div>
+        <div class="todo-overview-arrow">›</div>
+      </div>
+    `);
+  }
+  if(items.contact.length > 0){
+    parts.push(`
+      <div class="todo-overview-card ${urgentContact?'urgent':''}" onclick="setTodoFilter('contact')">
+        <div class="todo-overview-main">
+          <div class="todo-overview-title">التواصل مع أولياء الأمور</div>
+          <div class="todo-overview-sub">${items.contact.length} لم يتم التواصل معهم</div>
+        </div>
+        <div class="todo-overview-arrow">›</div>
+      </div>
+    `);
+  }
+
+  if(parts.length === 0){
+    return `
       <div class="todo-empty">
         <div class="todo-empty-icon">✓</div>
         <div class="todo-empty-title">كل شيء مكتمل</div>
         <div class="todo-empty-sub">لا توجد إجراءات تحتاج إلى استكمال حالياً</div>
       </div>
     `;
-  } else {
-    html += `<div class="todo-list">`;
-    ordered.forEach((item, idx) => {
-      html += renderTodoRow(item, idx);
-    });
-    html += `</div>`;
+  }
+  return `<div class="todo-overview-list">${parts.join('')}</div>`;
+}
+
+function renderSimpleList(list, emptyMsg){
+  if(list.length === 0){
+    return `
+      <div class="todo-empty">
+        <div class="todo-empty-icon">✓</div>
+        <div class="todo-empty-title">${escapeHtml(emptyMsg)}</div>
+      </div>
+    `;
+  }
+  return `<div class="todo-list">${list.map((item, idx) => renderTodoRow(item, idx)).join('')}</div>`;
+}
+
+function renderSessionsFilterView(items){
+  const totalSessions = currentMonth.sessions_count || 0;
+  if(todoSelectedSession === null || todoSelectedSession > totalSessions){
+    // نختار افتراضياً أول حصة فيها نقص
+    todoSelectedSession = 1;
+    for(let sn = 1; sn <= totalSessions; sn++){
+      if(items.bySession[sn].length > 0){ todoSelectedSession = sn; break; }
+    }
   }
 
-  view.innerHTML = html;
+  let sessionChips = `<div class="todo-session-chips">`;
+  for(let sn = 1; sn <= totalSessions; sn++){
+    const count = items.bySession[sn].length;
+    sessionChips += `
+      <button class="session-chip ${sn===todoSelectedSession?'active':''} ${count>0?'has-issues':''}"
+        onclick="selectTodoSession(${sn})">
+        حصة ${sn}${count>0?` <span class="session-chip-count">${count}</span>`:''}
+      </button>
+    `;
+  }
+  sessionChips += `</div>`;
+
+  const sessionList = items.bySession[todoSelectedSession] || [];
+  const listHtml = sessionList.length === 0
+    ? `
+      <div class="todo-empty">
+        <div class="todo-empty-icon">✓</div>
+        <div class="todo-empty-title">تم استكمال جميع الطلاب في هذه الحصة</div>
+      </div>
+    `
+    : `<div class="todo-list">${sessionList.map((item, idx) => renderTodoRow(item, idx)).join('')}</div>`;
+
+  return sessionChips + listHtml;
+}
+
+function selectTodoSession(sn){
+  todoSelectedSession = sn;
+  renderTodo();
 }
 
 function setTodoFilter(f){
   todoFilter = f;
+  if(f !== 'sessions') todoSelectedSession = null;
   renderTodo();
 }
 
@@ -1790,7 +1994,7 @@ function openTodoPhoneSheet(studentId, name){
     <input type="text" id="todoPhoneInput" placeholder="رقم الهاتف" style="margin-top:8px;">
     <div class="modal-actions">
       <button class="btn-secondary" onclick="closeModal('modalTodoSheet')">إلغاء</button>
-      <button class="btn-primary" onclick="submitTodoPhone('${studentId}')">حفظ</button>
+      <button class="btn-primary" id="todoPhoneSubmitBtn" onclick="submitTodoPhone('${studentId}')">حفظ</button>
     </div>
   `;
   openModal('modalTodoSheet');
@@ -1799,7 +2003,11 @@ function openTodoPhoneSheet(studentId, name){
 async function submitTodoPhone(studentId){
   const val = document.getElementById('todoPhoneInput').value.trim();
   if(!val){ showToast('من فضلك ادخل رقم الهاتف'); return; }
-  await updateStudentField(studentId, { parent_phone: val });
+
+  const btn = document.getElementById('todoPhoneSubmitBtn');
+  if(btn){ btn.disabled = true; btn.textContent = 'جارٍ الحفظ...'; }
+
+  const result = await updateStudentField(studentId, { parent_phone: val });
   const student = students.find(s => s.id === studentId);
   if(student){
     student.parent_phone = val;
@@ -1813,7 +2021,7 @@ async function submitTodoPhone(studentId){
     }
   }
   closeModal('modalTodoSheet');
-  showToast('تم إضافة الرقم ✓');
+  reportSaveResult(result);
   renderTodo();
 }
 
@@ -1860,7 +2068,7 @@ function openTodoContactSheet(studentId, name){
   body.innerHTML = `
     <h3>تسجيل التواصل</h3>
     <div class="field-label">الطالب: ${escapeHtml(name)}</div>
-    <div class="call-seg" style="margin-top:10px;">
+    <div class="call-seg" id="todoContactSeg" style="margin-top:10px;">
       <button onclick="submitTodoContact('${studentId}', 'تم التواصل')">تم التواصل</button>
       <button onclick="submitTodoContact('${studentId}', 'لم يتم الرد')">لم يتم الرد</button>
     </div>
@@ -1870,13 +2078,21 @@ function openTodoContactSheet(studentId, name){
   openModal('modalTodoSheet');
 }
 
+let todoContactSubmitting = false;
 async function submitTodoContact(studentId, status){
+  if(todoContactSubmitting) return;
+  todoContactSubmitting = true;
+  const seg = document.getElementById('todoContactSeg');
+  if(seg) seg.querySelectorAll('button').forEach(b => b.disabled = true);
+
   const note = document.getElementById('todoContactNote').value;
-  await updateStudentField(studentId, { parent_call_status: status, parent_call_notes: note });
+  const result = await updateStudentField(studentId, { parent_call_status: status, parent_call_notes: note });
   const student = students.find(s => s.id === studentId);
   if(student){ student.parent_call_status = status; student.parent_call_notes = note; }
+
+  todoContactSubmitting = false;
   closeModal('modalTodoSheet');
-  showToast('تم الحفظ ✓');
+  reportSaveResult(result);
   renderTodo();
 }
 
@@ -1886,6 +2102,16 @@ async function submitTodoContact(studentId, status){
 /* ============================================
    تقرير الشهر (إنفوجرافيك)
    ============================================ */
+function toggleReportSection(id){
+  const el = document.getElementById(id);
+  if(!el) return;
+  const isHidden = el.style.display === 'none';
+  el.style.display = isHidden ? 'block' : 'none';
+  const btn = el.previousElementSibling;
+  const arrow = btn ? btn.querySelector('.alert-toggle-arrow') : null;
+  if(arrow) arrow.textContent = isHidden ? 'إخفاء ˅' : 'عرض الطلاب ‹';
+}
+
 function renderReport(){
   const view = document.getElementById('reportView');
   const totalSessions = currentMonth.sessions_count || 0;
@@ -1939,17 +2165,39 @@ function renderReport(){
   const alertsHtml = [];
   if(noContactList.length){
     alertsHtml.push(`
-      <div class="report-alert">
-        <div class="alert-title">⚠️ لم يتم التواصل مع ${noContactList.length} من أولياء الأمور</div>
-        <div class="alert-body">${noContactList.map(n => escapeHtml(n)).join('، ')}</div>
+      <div class="report-alert-collapsible">
+        <button class="report-alert-toggle" onclick="toggleReportSection('reportContactList')">
+          <div class="alert-toggle-main">
+            <div class="alert-title">⚠️ التواصل مع أولياء الأمور</div>
+            <div class="alert-sub">${noContactList.length} لم يتم التواصل معهم</div>
+          </div>
+          <div class="alert-toggle-arrow">عرض الطلاب ‹</div>
+        </button>
+        <div class="report-alert-body" id="reportContactList" style="display:none;">
+          ${noContactList.map(n => `<div class="report-name-row"><span>${escapeHtml(n)}</span></div>`).join('')}
+        </div>
       </div>
     `);
   }
   if(absenceList.length){
+    absenceList.sort((a,b) => (b.absent/b.possible) - (a.absent/a.possible));
     alertsHtml.push(`
-      <div class="report-alert">
-        <div class="alert-title">🚩 طلاب معدل غيابهم مرتفع (٤٠٪ فأكثر)</div>
-        <div class="alert-body">${absenceList.map(a => `${escapeHtml(a.name)} (غاب ${a.absent} من ${a.possible})`).join('، ')}</div>
+      <div class="report-alert-collapsible">
+        <button class="report-alert-toggle" onclick="toggleReportSection('reportAbsenceList')">
+          <div class="alert-toggle-main">
+            <div class="alert-title">🚩 طلاب يحتاج غيابهم للانتباه</div>
+            <div class="alert-sub">${absenceList.length} طالبًا (٤٠٪ غياب فأكثر)</div>
+          </div>
+          <div class="alert-toggle-arrow">عرض الطلاب ‹</div>
+        </button>
+        <div class="report-alert-body" id="reportAbsenceList" style="display:none;">
+          ${absenceList.map(a => `
+            <div class="report-name-row">
+              <span>${escapeHtml(a.name)}</span>
+              <span class="report-name-sub">${a.absent} غياب من ${a.possible} حصة</span>
+            </div>
+          `).join('')}
+        </div>
       </div>
     `);
   }
@@ -1972,32 +2220,32 @@ function renderReport(){
       <div class="report-card gold">
         <div class="rc-label">حضور الشيخ</div>
         <div class="rc-value">${sheikhPct}%</div>
-        <div class="rc-fraction">${sheikhPresent} / ${sheikhRecorded || totalSessions} حصة</div>
+        <div class="rc-fraction">${sheikhPresent} حضور من ${sheikhRecorded} حصة مسجّلة</div>
       </div>
       <div class="report-card gold">
         <div class="rc-label">حضور المساعد</div>
         <div class="rc-value">${assistantPct}%</div>
-        <div class="rc-fraction">${assistantPresent} / ${assistantRecorded || totalSessions} حصة</div>
+        <div class="rc-fraction">${assistantPresent} حضور من ${assistantRecorded} حصة مسجّلة</div>
       </div>
       <div class="report-card blue">
         <div class="rc-label">حضور الطلاب</div>
         <div class="rc-value">${attendancePct}%</div>
-        <div class="rc-fraction">${totalPresent} / ${totalPossible} حضور</div>
+        <div class="rc-fraction">${totalPresent} حضور من ${totalPossible} تسجيلًا مكتملًا</div>
       </div>
       <div class="report-card green">
         <div class="rc-label">حفظ جيد</div>
         <div class="rc-value">${hifzGoodPct}%</div>
-        <div class="rc-fraction">${totalHifz} / ${totalHifzPossible} حصة</div>
+        <div class="rc-fraction">${totalHifz} تقييم جيد من ${totalHifzPossible} تقييمًا مسجلًا</div>
       </div>
       <div class="report-card orange">
         <div class="rc-label">حفظ ضعيف</div>
         <div class="rc-value">${hifzWeakPct}%</div>
-        <div class="rc-fraction">${totalWeak} / ${totalHifzPossible} حصة</div>
+        <div class="rc-fraction">${totalWeak} تقييم ضعيف من ${totalHifzPossible} تقييمًا مسجلًا</div>
       </div>
       <div class="report-card purple">
         <div class="rc-label">تم التواصل مع الأهل</div>
         <div class="rc-value">${contactPct}%</div>
-        <div class="rc-fraction">${contacted} / ${totalStudents} طالب</div>
+        <div class="rc-fraction">${contacted} طالب من ${totalStudents}</div>
       </div>
     </div>
 
@@ -2095,8 +2343,8 @@ async function saveSummaryNotes(fieldKey){
 async function persistSummary(){
   if(!summaryData.id) summaryData.id = genId();
   summaryData.updated_at = new Date().toISOString();
-  await writeLocal('month_summary', summaryData, 'upsert', 'month_id');
-  showToast(isOnline ? 'تم الحفظ ✓' : 'تم الحفظ محلياً، سيُرفع عند توفر النت');
+  const result = await writeLocal('month_summary', summaryData, 'upsert', 'month_id');
+  reportSaveResult(result);
 }
 
 /* ============================================
