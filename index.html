@@ -343,6 +343,11 @@
     padding:12px !important;background:#25D366 !important;color:#fff;display:flex;align-items:center;justify-content:center;
     flex-shrink:0;border-radius:10px;
   }
+  .btn-call, .btn-copy{
+    padding:12px !important;font-size:16px;display:flex;align-items:center;justify-content:center;
+    flex-shrink:0;border-radius:10px;background:var(--amber-bg);color:var(--gold-deep);
+    text-decoration:none;border:1px solid var(--line);
+  }
 
   .toast{
     position:fixed;bottom:calc(24px + var(--safe-bottom));left:50%;transform:translateX(-50%);
@@ -394,6 +399,105 @@
     border-radius:8px;cursor:pointer;font-size:13px;background:#fff;text-align:right;
   }
   .summary-opt.active{border-color:var(--gold);background:var(--amber-bg);color:var(--gold-deep);font-weight:700;}
+
+  /* ===== Report / Infographic page ===== */
+  .report-header{
+    text-align:center;padding:20px 16px 22px;margin-bottom:18px;
+    background:linear-gradient(135deg,var(--ink,#1a1a2e) 0%,#2b2440 100%);
+    border-radius:18px;color:#fff;
+  }
+  .report-header-title{font-size:20px;font-weight:800;margin-bottom:4px;}
+  .report-header-sub{font-size:13px;opacity:0.75;}
+
+  .report-grid{
+    display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:18px;
+  }
+  .report-card{
+    border-radius:16px;padding:16px 14px;text-align:center;box-shadow:var(--shadow);
+    border:1px solid rgba(0,0,0,0.04);
+  }
+  .rc-label{font-size:12.5px;font-weight:700;opacity:0.85;margin-bottom:6px;}
+  .rc-value{font-size:30px;font-weight:900;line-height:1;margin-bottom:6px;}
+  .rc-fraction{font-size:12px;opacity:0.7;font-weight:600;}
+
+  .report-card.gold{background:linear-gradient(135deg,#fdf6e3,#f7e7c1);}
+  .report-card.gold .rc-value{color:var(--gold-deep,#8a6a1f);}
+  .report-card.blue{background:linear-gradient(135deg,#e8f1ff,#cfe3ff);}
+  .report-card.blue .rc-value{color:#1e50a8;}
+  .report-card.green{background:linear-gradient(135deg,#e6f8ec,#c8f0d6);}
+  .report-card.green .rc-value{color:#1b7a3e;}
+  .report-card.orange{background:linear-gradient(135deg,#fff1e2,#ffe0bd);}
+  .report-card.orange .rc-value{color:#b5610f;}
+  .report-card.purple{background:linear-gradient(135deg,#f2e9ff,#e2ccff);}
+  .report-card.purple .rc-value{color:#6d2ec4;}
+
+  .report-alerts{display:flex;flex-direction:column;gap:10px;}
+  .report-alert{
+    background:var(--red-bg,#fdeaea);border-right:4px solid var(--red,#c0392b);
+    border-radius:12px;padding:12px 14px;
+  }
+  .report-alert.ok{
+    background:var(--green-bg,#e8f7ee);border-right:4px solid var(--green,#1b7a3e);
+  }
+  .alert-title{font-size:13.5px;font-weight:800;margin-bottom:4px;}
+  .alert-body{font-size:12.5px;color:var(--muted);line-height:1.6;}
+
+  .tab-btn{white-space:nowrap;}
+
+  /* ===== Todo / Inbox page ===== */
+  .todo-header{
+    background:var(--paper);border:1px solid var(--line);border-radius:14px;
+    padding:14px 16px;margin-bottom:12px;box-shadow:var(--shadow);
+  }
+  .todo-header-title{font-size:15px;font-weight:800;color:var(--gold-deep);margin-bottom:4px;}
+  .todo-header-count{font-size:13px;color:var(--muted);}
+  .todo-urgent{
+    margin-top:8px;padding:8px 10px;border-radius:8px;
+    background:var(--red-bg);color:var(--red);font-size:12.5px;font-weight:700;
+  }
+
+  .todo-chips{display:flex;gap:8px;overflow-x:auto;margin-bottom:14px;padding-bottom:2px;}
+  .chip{
+    flex-shrink:0;padding:8px 16px;border-radius:20px;border:1.5px solid var(--line);
+    background:#fff;font-size:13px;font-weight:600;color:var(--muted);white-space:nowrap;
+  }
+  .chip.active{background:var(--gold);border-color:var(--gold);color:#fff;}
+
+  .todo-list{display:flex;flex-direction:column;gap:10px;}
+  .todo-row{
+    background:var(--paper);border:1px solid var(--line);border-radius:12px;
+    padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;
+    box-shadow:var(--shadow);
+  }
+  .todo-row-main{flex:1;min-width:0;}
+  .todo-row-name{font-size:14px;font-weight:700;margin-bottom:2px;}
+  .todo-row-label{font-size:12.5px;color:var(--muted);}
+  .todo-row-actions{display:flex;gap:6px;align-items:center;flex-shrink:0;}
+  .todo-action{
+    padding:8px 14px;border-radius:8px;background:var(--amber-bg);color:var(--gold-deep);
+    font-size:12.5px;font-weight:700;white-space:nowrap;flex-shrink:0;
+  }
+  .todo-action-icon{
+    padding:8px;border-radius:8px;background:var(--green-bg);font-size:15px;
+    display:flex;align-items:center;justify-content:center;
+  }
+
+  .todo-empty{
+    text-align:center;padding:40px 20px;background:var(--paper);border-radius:14px;
+    border:1px solid var(--line);
+  }
+  .todo-empty-icon{font-size:32px;color:var(--green);margin-bottom:8px;}
+  .todo-empty-title{font-size:15px;font-weight:800;color:var(--green);margin-bottom:4px;}
+  .todo-empty-sub{font-size:13px;color:var(--muted);}
+
+  .badge-needs{
+    display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;
+    background:var(--amber-bg);color:var(--gold-deep);margin-right:6px;vertical-align:middle;
+  }
+  @media (max-width:380px){
+    .report-grid{grid-template-columns:1fr 1fr;}
+    .rc-value{font-size:26px;}
+  }
 
   /* ===== Install prompt ===== */
   #installBanner{
@@ -465,7 +569,9 @@
 
       <div class="tabs">
         <button class="tab-btn active" id="tabStudentsBtn" onclick="switchTab('students')">الطلاب</button>
+        <button class="tab-btn" id="tabTodoBtn" onclick="switchTab('todo')">المطلوب استكماله</button>
         <button class="tab-btn" id="tabSummaryBtn" onclick="switchTab('summary')">ملخص الشهر</button>
+        <button class="tab-btn" id="tabReportBtn" onclick="switchTab('report')">📊 تقرير الشهر</button>
       </div>
 
       <!-- Students tab -->
@@ -477,8 +583,14 @@
         <div id="studentsList"></div>
       </div>
 
+      <!-- Todo / Inbox tab -->
+      <div id="todoView" style="display:none;"></div>
+
       <!-- Summary tab -->
       <div id="summaryView" style="display:none;"></div>
+
+      <!-- Report / Infographic tab -->
+      <div id="reportView" style="display:none;"></div>
     </div>
 
   </div>
@@ -525,6 +637,11 @@
       <button class="btn-danger" id="confirmActionBtn" style="flex:1;">تأكيد</button>
     </div>
   </div>
+</div>
+
+<!-- ============ MODAL: Todo bottom sheet ============ -->
+<div class="modal-overlay" id="modalTodoSheet">
+  <div class="modal-box" id="todoSheetBody"></div>
 </div>
 
 <div id="installBanner">
@@ -796,8 +913,6 @@ let summaryData = null;
 const SUMMARY_FIELDS = [
   { key: 'sheikh_attendance', label: 'حضورك مع الشيخ والمتابعة',
     options: ['يحضر كل الأيام ويتابع', 'يحضر معظم الأيام', 'يحضر نادراً', 'لم يحضر'] },
-  { key: 'sheikh_presence', label: 'حضور الشيخ',
-    options: ['الشيخ حضر كل مرة', 'حضر معظم المرات', 'حضر نادراً', 'لم يحضر'] },
   { key: 'memorization_rate', label: 'نسبة الحفظ',
     options: ['المعظم حفظه كويس', 'المعظم حفظه متوسط', 'المعظم حفظه ضعيف'] },
   { key: 'attendance_rate', label: 'نسبة الحضور',
@@ -1059,12 +1174,26 @@ function goToMonths(){
 function switchTab(tab){
   activeTab = tab;
   document.getElementById('tabStudentsBtn').classList.toggle('active', tab === 'students');
+  document.getElementById('tabTodoBtn').classList.toggle('active', tab === 'todo');
   document.getElementById('tabSummaryBtn').classList.toggle('active', tab === 'summary');
+  document.getElementById('tabReportBtn').classList.toggle('active', tab === 'report');
   document.getElementById('studentsView').style.display = tab === 'students' ? 'block' : 'none';
+  document.getElementById('todoView').style.display = tab === 'todo' ? 'block' : 'none';
   document.getElementById('summaryView').style.display = tab === 'summary' ? 'block' : 'none';
+  document.getElementById('reportView').style.display = tab === 'report' ? 'block' : 'none';
 
   if(tab === 'summary'){
     loadSummary();
+  }
+  if(tab === 'report'){
+    (async () => {
+      const allSummaries = await idbGetAll('month_summary');
+      summaryData = allSummaries.find(s => s.month_id === currentMonth.id) || { id: genId(), month_id: currentMonth.id };
+      renderReport();
+    })();
+  }
+  if(tab === 'todo'){
+    renderTodo();
   }
 }
 
@@ -1121,13 +1250,20 @@ function renderStudents(){
       return `<div class="dot ${cls}" title="حصة ${sn}"></div>`;
     }).join('');
 
+    const needsCompletion = !s.parent_phone || !s.parent_phone.trim()
+      || s.parent_call_status !== 'تم التواصل'
+      || Array.from({length: currentMonth.sessions_count}, (_, i) => i + 1).some(sn => {
+        const r = studentRecords[sn] || {};
+        return !r.attendance || (r.attendance === 'حضر' && !r.memorization);
+      });
+
     card.innerHTML = `
       <div class="student-head" onclick="toggleStudent('${s.id}')">
         <div class="who">
           <div class="student-num">${idx + 1}</div>
           <div>
-            <h4>${escapeHtml(s.name)}</h4>
-            <div class="phone">${s.parent_phone ? escapeHtml(s.parent_phone) : 'بدون رقم هاتف'}</div>
+            <h4>${escapeHtml(s.name)} ${needsCompletion ? '<span class="badge-needs">يحتاج استكمال</span>' : ''}</h4>
+            <div class="phone">${s.parent_phone ? escapeHtml(s.parent_phone) : 'رقم ولي الأمر غير مسجل'}</div>
           </div>
         </div>
         <div class="chev">⌄</div>
@@ -1186,7 +1322,10 @@ function renderStudentBody(student){
     <div class="phone-row">
       <input type="text" id="phone-${student.id}" value="${escapeAttr(student.parent_phone || '')}" placeholder="رقم الهاتف">
       <button onclick="savePhone('${student.id}')">حفظ</button>
-      ${student.parent_phone ? `<button class="btn-whatsapp" onclick="openWhatsApp('${student.id}')" title="إرسال رسالة واتساب">
+      ${student.parent_phone ? `
+      <a class="btn-call" href="tel:${escapeAttr(student.parent_phone)}" title="اتصال">📞</a>
+      <button class="btn-copy" onclick="copyPhoneNumber('${escapeAttr(student.parent_phone)}')" title="نسخ الرقم">📋</button>
+      <button class="btn-whatsapp" onclick="openWhatsApp('${student.id}')" title="إرسال رسالة واتساب">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.46 1.32 4.96L2.05 22l5.25-1.38a9.9 9.9 0 004.74 1.21h.004c5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0012.04 2m0 1.67a8.2 8.2 0 018.24 8.24c0 4.55-3.7 8.25-8.25 8.25a8.2 8.2 0 01-4.19-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.18 8.18 0 01-1.26-4.38c0-4.55 3.7-8.25 8.25-8.25M8.53 6.83c-.16 0-.43.06-.66.31s-.87.86-.87 2.1.9 2.42 1.02 2.6c.12.16 1.75 2.85 4.32 3.87 2.13.85 2.57.68 3.03.64.46-.04 1.5-.61 1.7-1.2.2-.6.2-1.11.14-1.22-.06-.1-.23-.16-.48-.28-.25-.13-1.5-.74-1.73-.82-.23-.09-.4-.13-.57.13-.16.25-.65.82-.8 1-.15.16-.3.18-.55.06-.25-.13-1.07-.4-2.03-1.26-.75-.67-1.26-1.5-1.4-1.75-.15-.25-.02-.39.11-.51.11-.11.25-.3.37-.44.12-.15.16-.25.24-.42.08-.16.04-.31-.02-.44-.06-.13-.57-1.4-.79-1.9-.2-.5-.42-.42-.57-.43z"/></svg>
       </button>` : ''}
     </div>
@@ -1332,6 +1471,14 @@ function openWhatsApp(studentId){
   window.open(url, '_blank');
 }
 
+function copyPhoneNumber(phone){
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(phone).then(() => showToast('تم نسخ الرقم ✓')).catch(() => showToast('تعذر نسخ الرقم'));
+  } else {
+    showToast('تعذر نسخ الرقم');
+  }
+}
+
 async function savePhone(studentId){
   const val = document.getElementById(`phone-${studentId}`).value.trim();
   await updateStudentField(studentId, { parent_phone: val });
@@ -1446,8 +1593,422 @@ function confirmDeleteStudent(studentId, rosterId, name){
 }
 
 /* ============================================
+   المطلوب استكماله (Inbox)
+   ============================================ */
+function buildTodoItems(){
+  const totalSessions = currentMonth.sessions_count || 0;
+  const items = { today: [], old: [], missingData: [], contact: [] };
+
+  // آخر حصة فيها أي تسجيل (نعتبرها "اليوم" لأنه مفيش تاريخ فعلي مرتبط بكل حصة)
+  let lastActiveSession = 0;
+  students.forEach(s => {
+    const rec = records[s.id] || {};
+    for(let sn = 1; sn <= totalSessions; sn++){
+      if(rec[sn] && (rec[sn].attendance || rec[sn].memorization)) lastActiveSession = Math.max(lastActiveSession, sn);
+    }
+  });
+  if(lastActiveSession === 0) lastActiveSession = 1;
+
+  students.forEach(s => {
+    const rec = records[s.id] || {};
+
+    // بيانات ناقصة: رقم ولي الأمر
+    if(!s.parent_phone || !s.parent_phone.trim()){
+      items.missingData.push({
+        type: 'phone',
+        studentId: s.id,
+        name: s.name,
+        label: 'رقم ولي الأمر غير مسجل'
+      });
+    }
+
+    // تسجيلات ناقصة لكل حصة
+    for(let sn = 1; sn <= totalSessions; sn++){
+      const r = rec[sn] || {};
+      let issue = null;
+      if(!r.attendance){
+        issue = 'الحضور غير مسجل';
+      } else if(r.attendance === 'حضر' && !r.memorization){
+        issue = 'مستوى الحفظ غير مسجل';
+      }
+      if(issue){
+        const entry = {
+          type: 'session',
+          studentId: s.id,
+          sessionNumber: sn,
+          name: s.name,
+          label: `الحصة ${sn} — ${issue}`
+        };
+        if(sn === lastActiveSession) items.today.push(entry);
+        else items.old.push(entry);
+      }
+    }
+
+    // التواصل مع ولي الأمر خلال الشهر
+    if(s.parent_call_status !== 'تم التواصل'){
+      items.contact.push({
+        type: 'contact',
+        studentId: s.id,
+        name: s.name,
+        label: s.parent_call_status === 'لم يتم الرد' ? 'تمت محاولة التواصل ولم يرد' : 'لم يتم التواصل مع ولي الأمر هذا الشهر',
+        attempted: s.parent_call_status === 'لم يتم الرد'
+      });
+    }
+  });
+
+  return items;
+}
+
+function daysLeftInMonth(){
+  const now = new Date();
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  return lastDay - now.getDate();
+}
+
+let todoFilter = 'all';
+
+function renderTodo(){
+  const view = document.getElementById('todoView');
+  const items = buildTodoItems();
+  const totalCount = items.today.length + items.old.length + items.missingData.length + items.contact.length;
+
+  const urgentContact = daysLeftInMonth() <= 5 && items.contact.length > 0;
+
+  // ترتيب الأولوية: اليوم -> القديم -> بيانات ناقصة -> تواصل (أو تواصل أولاً لو قرب نهاية الشهر)
+  let ordered = [];
+  if(todoFilter === 'all' || todoFilter === 'sessions'){
+    ordered = ordered.concat(items.today.map(i => ({...i, group:'today'})));
+    if(todoFilter === 'all' && urgentContact){
+      ordered = ordered.concat(items.contact.map(i => ({...i, group:'contact'})));
+    }
+    ordered = ordered.concat(items.old.map(i => ({...i, group:'old'})));
+  }
+  if(todoFilter === 'all' || todoFilter === 'data'){
+    ordered = ordered.concat(items.missingData.map(i => ({...i, group:'data'})));
+  }
+  if(todoFilter === 'all' || todoFilter === 'contact'){
+    if(!(todoFilter === 'all' && urgentContact)){
+      ordered = ordered.concat(items.contact.map(i => ({...i, group:'contact'})));
+    }
+  }
+
+  let html = `
+    <div class="todo-header">
+      <div class="todo-header-title">المطلوب استكماله</div>
+      <div class="todo-header-count">${totalCount} حالة تحتاج استكمالاً</div>
+      ${urgentContact ? `<div class="todo-urgent">متبقي ${daysLeftInMonth()} أيام على نهاية الشهر — ${items.contact.length} أولياء أمور لم يتم التواصل معهم</div>` : ''}
+    </div>
+
+    <div class="todo-chips">
+      <button class="chip ${todoFilter==='all'?'active':''}" onclick="setTodoFilter('all')">الكل</button>
+      <button class="chip ${todoFilter==='data'?'active':''}" onclick="setTodoFilter('data')">بيانات ناقصة</button>
+      <button class="chip ${todoFilter==='contact'?'active':''}" onclick="setTodoFilter('contact')">تواصل</button>
+      <button class="chip ${todoFilter==='sessions'?'active':''}" onclick="setTodoFilter('sessions')">تسجيل ناقص</button>
+    </div>
+  `;
+
+  if(ordered.length === 0){
+    html += `
+      <div class="todo-empty">
+        <div class="todo-empty-icon">✓</div>
+        <div class="todo-empty-title">كل شيء مكتمل</div>
+        <div class="todo-empty-sub">لا توجد إجراءات تحتاج إلى استكمال حالياً</div>
+      </div>
+    `;
+  } else {
+    html += `<div class="todo-list">`;
+    ordered.forEach((item, idx) => {
+      html += renderTodoRow(item, idx);
+    });
+    html += `</div>`;
+  }
+
+  view.innerHTML = html;
+}
+
+function setTodoFilter(f){
+  todoFilter = f;
+  renderTodo();
+}
+
+function renderTodoRow(item, idx){
+  const safeName = escapeHtml(item.name);
+  if(item.type === 'phone'){
+    return `
+      <div class="todo-row">
+        <div class="todo-row-main">
+          <div class="todo-row-name">${safeName}</div>
+          <div class="todo-row-label">${escapeHtml(item.label)}</div>
+        </div>
+        <button class="todo-action" onclick="openTodoPhoneSheet('${item.studentId}', '${escapeAttr(item.name)}')">إضافة الرقم</button>
+      </div>
+    `;
+  }
+  if(item.type === 'session'){
+    return `
+      <div class="todo-row">
+        <div class="todo-row-main">
+          <div class="todo-row-name">${safeName}</div>
+          <div class="todo-row-label">${escapeHtml(item.label)}</div>
+        </div>
+        <button class="todo-action" onclick="openTodoSessionSheet('${item.studentId}', ${item.sessionNumber}, '${escapeAttr(item.name)}')">استكمال</button>
+      </div>
+    `;
+  }
+  if(item.type === 'contact'){
+    return `
+      <div class="todo-row">
+        <div class="todo-row-main">
+          <div class="todo-row-name">${safeName}</div>
+          <div class="todo-row-label">${escapeHtml(item.label)}</div>
+        </div>
+        <div class="todo-row-actions">
+          <button class="todo-action-icon" onclick="quickWhatsAppFromTodo('${item.studentId}')" title="واتساب">💬</button>
+          <button class="todo-action" onclick="openTodoContactSheet('${item.studentId}', '${escapeAttr(item.name)}')">تسجيل التواصل</button>
+        </div>
+      </div>
+    `;
+  }
+  return '';
+}
+
+function quickWhatsAppFromTodo(studentId){
+  const student = students.find(s => s.id === studentId);
+  if(!student || !student.parent_phone){
+    showToast('رقم الهاتف غير مسجل لهذا الطالب');
+    return;
+  }
+  openWhatsApp(studentId);
+}
+
+/* ---- Bottom sheet: إضافة رقم ولي الأمر ---- */
+function openTodoPhoneSheet(studentId, name){
+  const body = document.getElementById('todoSheetBody');
+  body.innerHTML = `
+    <h3>إضافة رقم ولي الأمر</h3>
+    <div class="field-label">الطالب: ${escapeHtml(name)}</div>
+    <input type="text" id="todoPhoneInput" placeholder="رقم الهاتف" style="margin-top:8px;">
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeModal('modalTodoSheet')">إلغاء</button>
+      <button class="btn-primary" onclick="submitTodoPhone('${studentId}')">حفظ</button>
+    </div>
+  `;
+  openModal('modalTodoSheet');
+}
+
+async function submitTodoPhone(studentId){
+  const val = document.getElementById('todoPhoneInput').value.trim();
+  if(!val){ showToast('من فضلك ادخل رقم الهاتف'); return; }
+  await updateStudentField(studentId, { parent_phone: val });
+  const student = students.find(s => s.id === studentId);
+  if(student){
+    student.parent_phone = val;
+    if(student.roster_id){
+      const rosterRow = await idbGet('roster', student.roster_id);
+      if(rosterRow){
+        rosterRow.parent_phone = val;
+        rosterRow.updated_at = new Date().toISOString();
+        await writeLocal('roster', rosterRow, 'upsert', 'id');
+      }
+    }
+  }
+  closeModal('modalTodoSheet');
+  showToast('تم إضافة الرقم ✓');
+  renderTodo();
+}
+
+/* ---- Bottom sheet: استكمال تسجيل حصة ---- */
+function openTodoSessionSheet(studentId, sessionNumber, name){
+  const rec = (records[studentId] && records[studentId][sessionNumber]) || {};
+  const body = document.getElementById('todoSheetBody');
+  body.innerHTML = `
+    <h3>استكمال الحصة ${sessionNumber}</h3>
+    <div class="field-label">الطالب: ${escapeHtml(name)}</div>
+    <div class="field-label" style="margin-top:10px;">الحضور</div>
+    <div class="seg" id="todoAttSeg">
+      <button class="${rec.attendance==='حضر'?'active present':''}" onclick="setTodoAttendance('${studentId}',${sessionNumber},'حضر')">حضر</button>
+      <button class="${rec.attendance==='محضرش'?'active absent':''}" onclick="setTodoAttendance('${studentId}',${sessionNumber},'محضرش')">محضرش</button>
+      <button class="${rec.attendance==='أول يوم'?'active firstday':''}" onclick="setTodoAttendance('${studentId}',${sessionNumber},'أول يوم')">أول يوم</button>
+    </div>
+    <div class="field-label" style="margin-top:10px;">مستوى الحفظ</div>
+    <div class="seg" id="todoMemSeg">
+      <button class="${rec.memorization==='حفظ'?'active good':''}" onclick="setTodoMemorization('${studentId}',${sessionNumber},'حفظ')">حفظ</button>
+      <button class="${rec.memorization==='حفظ ضعيف'?'active weak':''}" onclick="setTodoMemorization('${studentId}',${sessionNumber},'حفظ ضعيف')">حفظ ضعيف</button>
+      <button class="${rec.memorization==='محفظش'?'active absent':''}" onclick="setTodoMemorization('${studentId}',${sessionNumber},'محفظش')">محفظش</button>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-primary" onclick="closeModal('modalTodoSheet'); renderTodo();" style="width:100%;">تم</button>
+    </div>
+  `;
+  openModal('modalTodoSheet');
+}
+
+async function setTodoAttendance(studentId, sessionNumber, value){
+  await setAttendance(studentId, sessionNumber, value);
+  openTodoSessionSheet(studentId, sessionNumber, (students.find(s=>s.id===studentId)||{}).name || '');
+}
+
+async function setTodoMemorization(studentId, sessionNumber, value){
+  await setMemorization(studentId, sessionNumber, value);
+  openTodoSessionSheet(studentId, sessionNumber, (students.find(s=>s.id===studentId)||{}).name || '');
+}
+
+/* ---- Bottom sheet: تسجيل التواصل ---- */
+function openTodoContactSheet(studentId, name){
+  const student = students.find(s => s.id === studentId) || {};
+  const body = document.getElementById('todoSheetBody');
+  body.innerHTML = `
+    <h3>تسجيل التواصل</h3>
+    <div class="field-label">الطالب: ${escapeHtml(name)}</div>
+    <div class="call-seg" style="margin-top:10px;">
+      <button onclick="submitTodoContact('${studentId}', 'تم التواصل')">تم التواصل</button>
+      <button onclick="submitTodoContact('${studentId}', 'لم يتم الرد')">لم يتم الرد</button>
+    </div>
+    <div class="field-label" style="margin-top:10px;">ملاحظة (اختياري)</div>
+    <textarea id="todoContactNote" placeholder="ملاحظة">${escapeHtml(student.parent_call_notes || '')}</textarea>
+  `;
+  openModal('modalTodoSheet');
+}
+
+async function submitTodoContact(studentId, status){
+  const note = document.getElementById('todoContactNote').value;
+  await updateStudentField(studentId, { parent_call_status: status, parent_call_notes: note });
+  const student = students.find(s => s.id === studentId);
+  if(student){ student.parent_call_status = status; student.parent_call_notes = note; }
+  closeModal('modalTodoSheet');
+  showToast('تم الحفظ ✓');
+  renderTodo();
+}
+
+/* ============================================
    ملخص الشهر
    ============================================ */
+/* ============================================
+   تقرير الشهر (إنفوجرافيك)
+   ============================================ */
+function renderReport(){
+  const view = document.getElementById('reportView');
+  const totalSessions = currentMonth.sessions_count || 0;
+  const totalStudents = students.length;
+
+  // ===== حضور الشيخ والمساعد =====
+  const sheikhAtt = (summaryData && summaryData.sheikh_att) || {};
+  const assistantAtt = (summaryData && summaryData.assistant_att) || {};
+  let sheikhPresent = 0, sheikhRecorded = 0;
+  let assistantPresent = 0, assistantRecorded = 0;
+  for(let sn = 1; sn <= totalSessions; sn++){
+    if(sheikhAtt[sn]){ sheikhRecorded++; if(sheikhAtt[sn] === 'حضر') sheikhPresent++; }
+    if(assistantAtt[sn]){ assistantRecorded++; if(assistantAtt[sn] === 'حضر') assistantPresent++; }
+  }
+  const sheikhPct = sheikhRecorded ? Math.round((sheikhPresent/sheikhRecorded)*100) : 0;
+  const assistantPct = assistantRecorded ? Math.round((assistantPresent/assistantRecorded)*100) : 0;
+
+  // ===== حضور وحفظ الطلاب =====
+  let totalPresent = 0, totalAbsent = 0, totalPossible = 0;
+  let totalHifz = 0, totalWeak = 0, totalNoHifz = 0, totalHifzPossible = 0;
+  let contacted = 0, notContacted = 0;
+  const absenceList = []; // طلاب معدل غيابهم عالي
+  const noContactList = [];
+
+  students.forEach(s => {
+    const rec = records[s.id] || {};
+    let sPresent = 0, sAbsent = 0, sPossible = 0;
+    for(let sn = 1; sn <= totalSessions; sn++){
+      const r = rec[sn] || {};
+      if(r.attendance === 'حضر'){ sPresent++; totalPresent++; sPossible++; totalPossible++; }
+      else if(r.attendance === 'محضرش'){ sAbsent++; totalAbsent++; sPossible++; totalPossible++; }
+      else if(r.attendance === 'أول يوم'){ sPossible++; totalPossible++; }
+
+      if(r.memorization === 'حفظ'){ totalHifz++; totalHifzPossible++; }
+      else if(r.memorization === 'حفظ ضعيف'){ totalWeak++; totalHifzPossible++; }
+      else if(r.memorization === 'محفظش'){ totalNoHifz++; totalHifzPossible++; }
+    }
+    if(sPossible > 0 && (sAbsent / sPossible) >= 0.4){
+      absenceList.push({ name: s.name, absent: sAbsent, possible: sPossible });
+    }
+
+    if(s.parent_call_status === 'تم التواصل') contacted++;
+    else { notContacted++; noContactList.push(s.name); }
+  });
+
+  const attendancePct = totalPossible ? Math.round((totalPresent/totalPossible)*100) : 0;
+  const hifzGoodPct = totalHifzPossible ? Math.round((totalHifz/totalHifzPossible)*100) : 0;
+  const hifzWeakPct = totalHifzPossible ? Math.round((totalWeak/totalHifzPossible)*100) : 0;
+  const contactPct = totalStudents ? Math.round((contacted/totalStudents)*100) : 0;
+
+  const alertsHtml = [];
+  if(noContactList.length){
+    alertsHtml.push(`
+      <div class="report-alert">
+        <div class="alert-title">⚠️ لم يتم التواصل مع ${noContactList.length} من أولياء الأمور</div>
+        <div class="alert-body">${noContactList.map(n => escapeHtml(n)).join('، ')}</div>
+      </div>
+    `);
+  }
+  if(absenceList.length){
+    alertsHtml.push(`
+      <div class="report-alert">
+        <div class="alert-title">🚩 طلاب معدل غيابهم مرتفع (٤٠٪ فأكثر)</div>
+        <div class="alert-body">${absenceList.map(a => `${escapeHtml(a.name)} (غاب ${a.absent} من ${a.possible})`).join('، ')}</div>
+      </div>
+    `);
+  }
+  if(sheikhRecorded < totalSessions){
+    alertsHtml.push(`
+      <div class="report-alert">
+        <div class="alert-title">📋 حضور الشيخ غير مسجّل بالكامل</div>
+        <div class="alert-body">تم تسجيل ${sheikhRecorded} من ${totalSessions} حصة فقط في "ملخص الشهر"</div>
+      </div>
+    `);
+  }
+
+  view.innerHTML = `
+    <div class="report-header">
+      <div class="report-header-title">📊 تقرير ${escapeHtml(currentMonth.name)}</div>
+      <div class="report-header-sub">${totalStudents} طالب · ${totalSessions} حصة</div>
+    </div>
+
+    <div class="report-grid">
+      <div class="report-card gold">
+        <div class="rc-label">حضور الشيخ</div>
+        <div class="rc-value">${sheikhPct}%</div>
+        <div class="rc-fraction">${sheikhPresent} / ${sheikhRecorded || totalSessions} حصة</div>
+      </div>
+      <div class="report-card gold">
+        <div class="rc-label">حضور المساعد</div>
+        <div class="rc-value">${assistantPct}%</div>
+        <div class="rc-fraction">${assistantPresent} / ${assistantRecorded || totalSessions} حصة</div>
+      </div>
+      <div class="report-card blue">
+        <div class="rc-label">حضور الطلاب</div>
+        <div class="rc-value">${attendancePct}%</div>
+        <div class="rc-fraction">${totalPresent} / ${totalPossible} حضور</div>
+      </div>
+      <div class="report-card green">
+        <div class="rc-label">حفظ جيد</div>
+        <div class="rc-value">${hifzGoodPct}%</div>
+        <div class="rc-fraction">${totalHifz} / ${totalHifzPossible} حصة</div>
+      </div>
+      <div class="report-card orange">
+        <div class="rc-label">حفظ ضعيف</div>
+        <div class="rc-value">${hifzWeakPct}%</div>
+        <div class="rc-fraction">${totalWeak} / ${totalHifzPossible} حصة</div>
+      </div>
+      <div class="report-card purple">
+        <div class="rc-label">تم التواصل مع الأهل</div>
+        <div class="rc-value">${contactPct}%</div>
+        <div class="rc-fraction">${contacted} / ${totalStudents} طالب</div>
+      </div>
+    </div>
+
+    ${alertsHtml.length ? `<div class="report-alerts">${alertsHtml.join('')}</div>` : `
+      <div class="report-alert ok">
+        <div class="alert-title">✅ لا توجد تنبيهات — كل شيء مسجّل وعلى ما يرام</div>
+      </div>
+    `}
+  `;
+}
+
 async function loadSummary(){
   const allSummaries = await idbGetAll('month_summary');
   summaryData = allSummaries.find(s => s.month_id === currentMonth.id) || { id: genId(), month_id: currentMonth.id };
@@ -1457,6 +2018,36 @@ async function loadSummary(){
 function renderSummary(){
   const view = document.getElementById('summaryView');
   view.innerHTML = '';
+
+  // ===== شبكة حضور الشيخ والمساعد لكل حصة =====
+  const sheikhAtt = summaryData.sheikh_att || {};
+  const assistantAtt = summaryData.assistant_att || {};
+  let attGridHtml = '';
+  for(let sn = 1; sn <= currentMonth.sessions_count; sn++){
+    const sVal = sheikhAtt[sn] || '';
+    const aVal = assistantAtt[sn] || '';
+    attGridHtml += `
+      <div class="session-cell">
+        <div class="snum">حصة ${sn}</div>
+        <div class="seg" data-type="sheikh" data-session="${sn}">
+          <button class="${sVal==='حضر'?'active present':''}" onclick="setPresenceStatus('sheikh_att',${sn},'حضر')">الشيخ حضر</button>
+          <button class="${sVal==='غاب'?'active absent':''}" onclick="setPresenceStatus('sheikh_att',${sn},'غاب')">الشيخ غاب</button>
+        </div>
+        <div class="seg" data-type="assistant" data-session="${sn}">
+          <button class="${aVal==='حضر'?'active present':''}" onclick="setPresenceStatus('assistant_att',${sn},'حضر')">المساعد حضر</button>
+          <button class="${aVal==='غاب'?'active absent':''}" onclick="setPresenceStatus('assistant_att',${sn},'غاب')">المساعد غاب</button>
+        </div>
+      </div>
+    `;
+  }
+
+  const attCard = document.createElement('div');
+  attCard.className = 'summary-card';
+  attCard.innerHTML = `
+    <h4>حضور الشيخ والمساعد (لكل حصة)</h4>
+    <div class="sessions-grid">${attGridHtml}</div>
+  `;
+  view.appendChild(attCard);
 
   SUMMARY_FIELDS.forEach(field => {
     const statusKey = field.key + '_status';
@@ -1480,6 +2071,13 @@ function renderSummary(){
     `;
     view.appendChild(card);
   });
+}
+
+async function setPresenceStatus(fieldKey, sessionNumber, value){
+  if(!summaryData[fieldKey]) summaryData[fieldKey] = {};
+  summaryData[fieldKey][sessionNumber] = value;
+  await persistSummary();
+  renderSummary();
 }
 
 async function setSummaryStatus(fieldKey, value){
