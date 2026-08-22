@@ -1691,10 +1691,17 @@ function buildWhatsAppMessage(student){
   const lines = [];
   lines.push(`السلام عليكم ورحمة الله وبركاته`);
   lines.push(``);
-  lines.push(`نفيدكم بملخص متابعة الطالب/ة "${student.name}" خلال ${currentMonth.name} في دار الأرقم لتحفيظ القرآن الكريم:`);
-  lines.push(``);
-  lines.push(`📌 الحضور: ${present} حصة حضور، ${absent} غياب${firstDay ? `، ${firstDay} أول يوم` : ''}`);
-  lines.push(`📖 الحفظ: ${hifz} حصة حفظ جيد${weak ? `، ${weak} حفظ ضعيف` : ''}${absentMem ? `، ${absentMem} لم يحفظ` : ''}`);
+  lines.push(`نفيدكم بملخص متابعة الطالب/ة`);
+  lines.push(`( ${student.name} )`);
+  lines.push(`خلال ${currentMonth.name} في دار الأرقم لتحفيظ القرآن الكريم:`);
+  lines.push(`📌 الحضور: `);
+  lines.push(`${present} حصة حضور`);
+  lines.push(`${absent} غياب`);
+  if(firstDay) lines.push(`${firstDay} أول يوم`);
+  lines.push(`📖 الحفظ: `);
+  lines.push(`${hifz} حصة حفظ جيد`);
+  if(weak) lines.push(`${weak} حفظ ضعيف`);
+  lines.push(`${absentMem} لم يحفظ`);
 
   if(student.notes && student.notes.trim()){
     lines.push(``);
@@ -1702,8 +1709,7 @@ function buildWhatsAppMessage(student){
     lines.push(student.notes.trim());
   }
 
-  lines.push(``);
-  lines.push(`نرجو المتابعة معه في المنزل، وجزاكم الله خيراً.`);
+  lines.push(`نرجو المتابعة معه في المنزل وجزاكم الله خيراً.`);
 
   return lines.join('\n');
 }
