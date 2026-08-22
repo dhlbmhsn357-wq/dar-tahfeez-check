@@ -1089,32 +1089,59 @@ function genId(){
 }
 
 async function writeLocal(table, record, action='upsert', conflictKey=null){
-  await idbPut(table, record);
-  await idbAddToQueue({ table, action, payload: record, conflictKey });
+  try{
+    await idbPut(table, record);
+    await idbAddToQueue({ table, action, payload: record, conflictKey });
+  } catch(err){
+    // فشل الحفظ حتى محلياً (مثلاً: مساحة تخزين ممتلئة أو خطأ في IndexedDB).
+    // نرجع نتيجة واضحة بدل ترك استثناء غير مُعالَج يختفي بصمت ويجعل المستخدم
+    // يظن أن البيانات حُفظت بينما لم تُحفظ فعلياً في أي مكان.
+    console.error('writeLocal failed', table, err);
+    return { savedLocally: false, syncedNow: false, error: err };
+  }
 
   if(isOnline){
-    const synced = await processSyncQueue();
-    return { savedLocally: true, syncedNow: !!synced };
+    try{
+      const synced = await processSyncQueue();
+      return { savedLocally: true, syncedNow: !!synced };
+    } catch(err){
+      console.error('processSyncQueue failed after writeLocal', err);
+      // البيانات محفوظة محلياً بالفعل (idbPut نجحت فوق)؛ فقط المزامنة السحابية فشلت،
+      // وستُعاد المحاولة تلقائياً لاحقاً عبر الطابور
+      return { savedLocally: true, syncedNow: false };
+    }
   }
   return { savedLocally: true, syncedNow: false };
 }
 
 async function deleteLocal(table, id){
-  await idbDelete(table, id);
-  await idbAddToQueue({ table, action: 'delete', payload: { id } });
+  try{
+    await idbDelete(table, id);
+    await idbAddToQueue({ table, action: 'delete', payload: { id } });
+  } catch(err){
+    console.error('deleteLocal failed', table, id, err);
+    return { savedLocally: false };
+  }
   if(isOnline) processSyncQueue();
+  return { savedLocally: true };
 }
 
 async function deleteLocalBy(table, column, value, localPredicate){
-  // حذف كل العناصر المطابقة محلياً
-  const all = await idbGetAll(table);
-  for(const item of all){
-    if(localPredicate(item)){
-      await idbDelete(table, item.id);
+  try{
+    // حذف كل العناصر المطابقة محلياً
+    const all = await idbGetAll(table);
+    for(const item of all){
+      if(localPredicate(item)){
+        await idbDelete(table, item.id);
+      }
     }
+    await idbAddToQueue({ table, action: 'delete_by', payload: { column, value } });
+  } catch(err){
+    console.error('deleteLocalBy failed', table, column, value, err);
+    return { savedLocally: false };
   }
-  await idbAddToQueue({ table, action: 'delete_by', payload: { column, value } });
   if(isOnline) processSyncQueue();
+  return { savedLocally: true };
 }
 
 /* ============================================
@@ -1146,22 +1173,44 @@ async function initApp(){
   await openIDB();
   updateConnectionUI();
 
-  if(isOnline){
+  // لا نُحمّل بيانات السحابة إلا بعد التأكد أن هناك جلسة صالحة بالفعل،
+  // حتى لا يتم تنزيل بيانات كل الطلاب لجهاز أي زائر يفتح الرابط قبل تسجيل الدخول
+  const hasSession = checkSession();
+
+  if(hasSession && isOnline){
     await refreshFromCloud();
     processSyncQueue();
   }
-
-  checkSession();
 }
 
 /* ============================================
    تسجيل الدخول (يعمل أيضاً بدون نت إذا كان قد سجل دخول قبل ذلك)
+   ملاحظة أمنية: الجلسة الحالية مبنية على علم محلي بسيط في localStorage
+   (وليست جلسة مُدارة من السيرفر)، لذلك أضفنا مدة صلاحية (7 أيام)
+   حتى لا تبقى الجلسة سارية للأبد على جهاز مفقود أو مشترك.
    ============================================ */
+const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 أيام
+
 function checkSession(){
   const saved = localStorage.getItem('dar_alarqam_logged_in');
-  if(saved === 'true'){
+  const savedAt = parseInt(localStorage.getItem('dar_alarqam_session_at') || '0', 10);
+  const isExpired = !savedAt || (Date.now() - savedAt) > SESSION_MAX_AGE_MS;
+
+  if(saved === 'true' && !isExpired){
     showApp();
+    return true;
   }
+  if(saved === 'true' && isExpired){
+    // جلسة قديمة منتهية - ننظفها ونطلب تسجيل دخول جديد
+    localStorage.removeItem('dar_alarqam_logged_in');
+    localStorage.removeItem('dar_alarqam_session_at');
+  }
+  return false;
+}
+
+function setSession(){
+  localStorage.setItem('dar_alarqam_logged_in', 'true');
+  localStorage.setItem('dar_alarqam_session_at', String(Date.now()));
 }
 
 async function handleLogin(){
@@ -1186,8 +1235,10 @@ async function handleLogin(){
 
       if(!error && data){
         await idbPut('meta', { key: 'cached_user', value: { username, password } });
-        localStorage.setItem('dar_alarqam_logged_in', 'true');
+        setSession();
+        await refreshFromCloud();
         showApp();
+        processSyncQueue();
         return;
       }
       if(!error && !data){
@@ -1199,7 +1250,7 @@ async function handleLogin(){
 
   const cached = await idbGet('meta', 'cached_user');
   if(cached && cached.value.username === username && cached.value.password === password){
-    localStorage.setItem('dar_alarqam_logged_in', 'true');
+    setSession();
     showApp();
     return;
   }
@@ -1211,6 +1262,7 @@ async function handleLogin(){
 
 function handleLogout(){
   localStorage.removeItem('dar_alarqam_logged_in');
+  localStorage.removeItem('dar_alarqam_session_at');
   document.getElementById('appScreen').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
   document.getElementById('loginUser').value = '';
@@ -1276,9 +1328,18 @@ function closeModal(id){ document.getElementById(id).classList.remove('show'); }
 
 async function submitAddMonth(){
   const name = document.getElementById('newMonthName').value.trim();
-  const sessions = parseInt(document.getElementById('newMonthSessions').value) || 14;
+  const sessionsRaw = document.getElementById('newMonthSessions').value.trim();
   const startEmpty = document.getElementById('newMonthEmpty').checked;
   if(!name){ showToast('من فضلك ادخل اسم الشهر'); return; }
+
+  // Validation صارم لعدد الحصص: لازم يكون رقم صحيح موجب ضمن نطاق منطقي.
+  // بدون هذا التحقق، قيمة فارغة أو صفر أو سالبة كانت تمر بصمت وتكسر كل
+  // حسابات التقرير (تقسيم على صفر) وتمنع تسجيل أي حصة للطلاب المُضافين.
+  const sessions = sessionsRaw === '' ? 14 : parseInt(sessionsRaw, 10);
+  if(!Number.isInteger(sessions) || sessions < 1 || sessions > 62){
+    showToast('عدد الحصص يجب أن يكون رقماً صحيحاً بين 1 و62');
+    return;
+  }
 
   const newMonth = {
     id: genId(),
@@ -1286,7 +1347,11 @@ async function submitAddMonth(){
     sessions_count: sessions,
     created_at: new Date().toISOString()
   };
-  await writeLocal('months', newMonth, 'insert');
+  const monthResult = await writeLocal('months', newMonth, 'insert');
+  if(monthResult && monthResult.savedLocally === false){
+    showToast('تعذر إنشاء الشهر — حاول مرة أخرى');
+    return;
+  }
 
   if(!startEmpty){
     const rosterData = await idbGetAll('roster');
@@ -1329,39 +1394,49 @@ function confirmDeleteMonth(month){
 }
 
 async function deleteMonth(month){
-  // حذف سجلات الحصص لطلاب هذا الشهر
-  const allStudents = await idbGetAll('students');
-  const studentsInMonth = allStudents.filter(s => s.month_id === month.id);
+  try{
+    // حذف سجلات الحصص لطلاب هذا الشهر
+    const allStudents = await idbGetAll('students');
+    const studentsInMonth = allStudents.filter(s => s.month_id === month.id);
 
-  const allRecords = await idbGetAll('session_records');
-  for(const rec of allRecords){
-    if(studentsInMonth.some(s => s.id === rec.student_id)){
-      await idbDelete('session_records', rec.id);
+    const allRecords = await idbGetAll('session_records');
+    for(const rec of allRecords){
+      if(studentsInMonth.some(s => s.id === rec.student_id)){
+        await idbDelete('session_records', rec.id);
+      }
     }
+
+    // حذف الطلاب المرتبطين بهذا الشهر
+    for(const s of studentsInMonth){
+      await idbDelete('students', s.id);
+    }
+
+    // حذف ملخص الشهر إن وجد
+    await idbDelete('month_summary', month.id).catch(()=>{});
+
+    // حذف الشهر نفسه
+    await idbDelete('months', month.id);
+
+    // تسجيل عمليات الحذف في قائمة المزامنة (لحذفها من Supabase عند توفر النت)
+    await idbAddToQueue({ table: 'session_records', action: 'delete_by', payload: { column: 'month_id', value: month.id } });
+    await idbAddToQueue({ table: 'students', action: 'delete_by', payload: { column: 'month_id', value: month.id } });
+    await idbAddToQueue({ table: 'month_summary', action: 'delete', payload: { id: month.id } });
+    await idbAddToQueue({ table: 'months', action: 'delete', payload: { id: month.id } });
+
+    if(isOnline) processSyncQueue();
+
+    months = months.filter(m => m.id !== month.id);
+    renderMonths();
+    showToast('تم حذف الشهر بنجاح');
+  } catch(err){
+    console.error('deleteMonth failed', month, err);
+    // نعيد تحميل الحالة الفعلية من IndexedDB بدل ترك الواجهة في حالة غير معروفة
+    // بعد فشل جزئي محتمل في منتصف عملية الحذف متعددة الخطوات
+    months = await idbGetAll('months');
+    months.sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
+    renderMonths();
+    showToast('حدث خطأ أثناء حذف الشهر — قد تكون العملية غير مكتملة، برجاء المحاولة مرة أخرى');
   }
-
-  // حذف الطلاب المرتبطين بهذا الشهر
-  for(const s of studentsInMonth){
-    await idbDelete('students', s.id);
-  }
-
-  // حذف ملخص الشهر إن وجد
-  await idbDelete('month_summary', month.id).catch(()=>{});
-
-  // حذف الشهر نفسه
-  await idbDelete('months', month.id);
-
-  // تسجيل عمليات الحذف في قائمة المزامنة (لحذفها من Supabase عند توفر النت)
-  await idbAddToQueue({ table: 'session_records', action: 'delete_by', payload: { column: 'month_id', value: month.id } });
-  await idbAddToQueue({ table: 'students', action: 'delete_by', payload: { column: 'month_id', value: month.id } });
-  await idbAddToQueue({ table: 'month_summary', action: 'delete', payload: { id: month.id } });
-  await idbAddToQueue({ table: 'months', action: 'delete', payload: { id: month.id } });
-
-  if(isOnline) processSyncQueue();
-
-  months = months.filter(m => m.id !== month.id);
-  renderMonths();
-  showToast('تم حذف الشهر بنجاح');
 }
 
 /* ============================================
@@ -1543,7 +1618,7 @@ function renderStudentBody(student){
           <button class="phone-edit-btn" onclick="showPhoneEdit('${student.id}')" title="تعديل الرقم">تعديل</button>
         </div>
         <div class="phone-actions-row" id="phoneActions-${student.id}">
-          <a class="btn-call" href="tel:${escapeAttr(student.parent_phone)}" title="اتصال">
+          <a class="btn-call" href="tel:${escapeHtml(student.parent_phone)}" title="اتصال">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.01-.24c1.12.37 2.33.57 3.58.57a1 1 0 011 1V20a1 1 0 01-1 1C10.61 21 3 13.39 3 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.46.57 3.58a1 1 0 01-.25 1.01l-2.2 2.2z"/></svg>
             اتصال
           </a>
@@ -1551,13 +1626,13 @@ function renderStudentBody(student){
             <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.46 1.32 4.96L2.05 22l5.25-1.38a9.9 9.9 0 004.74 1.21h.004c5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0012.04 2m0 1.67a8.2 8.2 0 018.24 8.24c0 4.55-3.7 8.25-8.25 8.25a8.2 8.2 0 01-4.19-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.18 8.18 0 01-1.26-4.38c0-4.55 3.7-8.25 8.25-8.25M8.53 6.83c-.16 0-.43.06-.66.31s-.87.86-.87 2.1.9 2.42 1.02 2.6c.12.16 1.75 2.85 4.32 3.87 2.13.85 2.57.68 3.03.64.46-.04 1.5-.61 1.7-1.2.2-.6.2-1.11.14-1.22-.06-.1-.23-.16-.48-.28-.25-.13-1.5-.74-1.73-.82-.23-.09-.4-.13-.57.13-.16.25-.65.82-.8 1-.15.16-.3.18-.55.06-.25-.13-1.07-.4-2.03-1.26-.75-.67-1.26-1.5-1.4-1.75-.15-.25-.02-.39.11-.51.11-.11.25-.3.37-.44.12-.15.16-.25.24-.42.08-.16.04-.31-.02-.44-.06-.13-.57-1.4-.79-1.9-.2-.5-.42-.42-.57-.43z"/></svg>
             واتساب
           </button>
-          <button class="btn-copy" onclick="copyPhoneNumber('${escapeAttr(student.parent_phone)}')" title="نسخ الرقم">
+          <button class="btn-copy" onclick="copyPhoneNumber('${escapeJsString(student.parent_phone)}')" title="نسخ الرقم">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4a2 2 0 00-2 2v14h2V3h12V1zm3 4H8a2 2 0 00-2 2v14a2 2 0 002 2h11a2 2 0 002-2V7a2 2 0 00-2-2zm0 16H8V7h11v14z"/></svg>
             نسخ
           </button>
         </div>
         <div class="phone-edit-row" id="phoneEditRow-${student.id}" style="display:none;">
-          <input type="text" id="phone-${student.id}" value="${escapeAttr(student.parent_phone || '')}" placeholder="رقم الهاتف">
+          <input type="text" id="phone-${student.id}" value="${escapeHtml(student.parent_phone || '')}" placeholder="رقم الهاتف">
           <button class="btn-save-phone" onclick="savePhone('${student.id}')">حفظ</button>
         </div>
       ` : `
@@ -1579,8 +1654,8 @@ function renderStudentBody(student){
     <textarea id="call-${student.id}" placeholder="ملاحظات المكالمة (اختياري)" onblur="saveCallNotes('${student.id}')">${escapeHtml(student.parent_call_notes || '')}</textarea>
 
     <div class="save-row">
-      <button class="btn-secondary" onclick="confirmRemoveFromMonth('${student.id}', '${escapeAttr(student.name)}')" style="margin-bottom:8px;">حذف من هذا الشهر فقط</button>
-      <button class="btn-danger" onclick="confirmDeleteStudent('${student.id}', '${student.roster_id}', '${escapeAttr(student.name)}')">حذف الطالب نهائياً من كل الشهور</button>
+      <button class="btn-secondary" onclick="confirmRemoveFromMonth('${student.id}', '${escapeJsString(student.name)}')" style="margin-bottom:8px;">حذف من هذا الشهر فقط</button>
+      <button class="btn-danger" onclick="confirmDeleteStudent('${student.id}', '${student.roster_id}', '${escapeJsString(student.name)}')">حذف الطالب نهائياً من كل الشهور</button>
     </div>
   `;
 }
@@ -1617,6 +1692,11 @@ async function setMemorization(studentId, sessionNumber, value){
    إظهار نتيجة الحفظ الحقيقية للمستخدم
    ============================================ */
 function reportSaveResult(result){
+  // فشل تام - لم تُحفظ البيانات حتى محلياً. لا يجب طمأنة المستخدم في هذه الحالة.
+  if(result && result.savedLocally === false){
+    showToast('تعذر الحفظ — حاول مرة أخرى');
+    return;
+  }
   if(!isOnline){
     showToast('تم الحفظ محلياً، سيُرفع عند توفر النت');
     return;
@@ -1653,9 +1733,23 @@ async function persistRecord(studentId, sessionNumber){
 async function updateStudentField(studentId, fields){
   const student = students.find(s => s.id === studentId);
   if(!student) return null;
+
+  // نحتفظ بالقيم القديمة لنتمكن من التراجع عنها إذا فشل الحفظ فعلياً،
+  // حتى لا تظهر الواجهة بيانات كأنها محفوظة بينما هي غير محفوظة في أي مكان
+  const previousValues = {};
+  Object.keys(fields).forEach(k => { previousValues[k] = student[k]; });
+  const previousUpdatedAt = student.updated_at;
+
   Object.assign(student, fields);
   student.updated_at = new Date().toISOString();
-  return await writeLocal('students', student, 'upsert', 'id');
+  const result = await writeLocal('students', student, 'upsert', 'id');
+
+  if(result && result.savedLocally === false){
+    Object.assign(student, previousValues);
+    student.updated_at = previousUpdatedAt;
+  }
+
+  return result;
 }
 
 async function saveNotes(studentId){
@@ -1694,10 +1788,12 @@ function buildWhatsAppMessage(student){
   lines.push(`نفيدكم بملخص متابعة الطالب/ة`);
   lines.push(`( ${student.name} )`);
   lines.push(`خلال ${currentMonth.name} في دار الأرقم لتحفيظ القرآن الكريم:`);
+  lines.push(``);
   lines.push(`📌 الحضور: `);
   lines.push(`${present} حصة حضور`);
   lines.push(`${absent} غياب`);
   if(firstDay) lines.push(`${firstDay} أول يوم`);
+  lines.push(``);
   lines.push(`📖 الحفظ: `);
   lines.push(`${hifz} حصة حفظ جيد`);
   if(weak) lines.push(`${weak} حفظ ضعيف`);
@@ -1709,6 +1805,7 @@ function buildWhatsAppMessage(student){
     lines.push(student.notes.trim());
   }
 
+  lines.push(``);
   lines.push(`نرجو المتابعة معه في المنزل وجزاكم الله خيراً.`);
 
   return lines.join('\n');
@@ -1754,6 +1851,11 @@ function showPhoneEdit(studentId){
 async function savePhone(studentId){
   const val = document.getElementById(`phone-${studentId}`).value.trim();
   const result = await updateStudentField(studentId, { parent_phone: val });
+
+  if(result && result.savedLocally === false){
+    showToast('تعذر حفظ رقم الهاتف — حاول مرة أخرى');
+    return;
+  }
 
   const student = students.find(s => s.id === studentId);
   if(student && student.roster_id){
@@ -1808,7 +1910,11 @@ async function submitAddStudent(){
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   };
-  await writeLocal('roster', rosterRow, 'insert');
+  const rosterResult = await writeLocal('roster', rosterRow, 'insert');
+  if(rosterResult && rosterResult.savedLocally === false){
+    showToast('تعذر إضافة الطالب — حاول مرة أخرى');
+    return;
+  }
 
   const nextOrder = students.length > 0 ? Math.max(...students.map(s => s.display_order)) + 1 : 1;
   const studentRow = {
@@ -1823,7 +1929,11 @@ async function submitAddStudent(){
     parent_call_notes: '',
     updated_at: new Date().toISOString()
   };
-  await writeLocal('students', studentRow, 'insert');
+  const studentResult = await writeLocal('students', studentRow, 'insert');
+  if(studentResult && studentResult.savedLocally === false){
+    showToast('تعذر إضافة الطالب لهذا الشهر — حاول مرة أخرى');
+    return;
+  }
 
   students.push(studentRow);
   closeModal('modalAddStudent');
@@ -1841,12 +1951,17 @@ function confirmRemoveFromMonth(studentId, name){
     }
     await idbAddToQueue({ table: 'session_records', action: 'delete_by', payload: { column: 'student_id', value: studentId } });
 
-    await deleteLocal('students', studentId);
+    const result = await deleteLocal('students', studentId);
+    closeModal('modalConfirm');
+
+    if(result && result.savedLocally === false){
+      showToast('تعذر حذف الطالب — حاول مرة أخرى');
+      return;
+    }
 
     students = students.filter(s => s.id !== studentId);
     delete records[studentId];
     if(openStudentId === studentId) openStudentId = null;
-    closeModal('modalConfirm');
     renderStudents();
     showToast('تم حذف الطالب من هذا الشهر فقط');
   };
@@ -1857,13 +1972,18 @@ function confirmDeleteStudent(studentId, rosterId, name){
   document.getElementById('confirmText').textContent = `هل تريد حذف الطالب "${name}" نهائياً من كل الشهور؟ سيتم حذف كل سجلاته وبياناته بشكل كامل ولا يمكن التراجع عن هذا.`;
   const btn = document.getElementById('confirmActionBtn');
   btn.onclick = async () => {
-    await deleteLocalBy('students', 'roster_id', rosterId, (item) => item.roster_id === rosterId);
-    await deleteLocal('roster', rosterId);
+    const result1 = await deleteLocalBy('students', 'roster_id', rosterId, (item) => item.roster_id === rosterId);
+    const result2 = await deleteLocal('roster', rosterId);
+    closeModal('modalConfirm');
+
+    if((result1 && result1.savedLocally === false) || (result2 && result2.savedLocally === false)){
+      showToast('تعذر حذف الطالب بالكامل — حاول مرة أخرى');
+      return;
+    }
 
     students = students.filter(s => s.roster_id !== rosterId);
     delete records[studentId];
     if(openStudentId === studentId) openStudentId = null;
-    closeModal('modalConfirm');
     renderStudents();
     showToast('تم حذف الطالب نهائياً من كل الشهور');
   };
@@ -2092,7 +2212,7 @@ function renderTodoRow(item, idx){
           <div class="todo-row-name">${safeName}</div>
           <div class="todo-row-label">${escapeHtml(item.label)}</div>
         </div>
-        <button class="todo-action" onclick="openTodoPhoneSheet('${item.studentId}', '${escapeAttr(item.name)}')">إضافة الرقم</button>
+        <button class="todo-action" onclick="openTodoPhoneSheet('${item.studentId}', '${escapeJsString(item.name)}')">إضافة الرقم</button>
       </div>
     `;
   }
@@ -2103,7 +2223,7 @@ function renderTodoRow(item, idx){
           <div class="todo-row-name">${safeName}</div>
           <div class="todo-row-label">${escapeHtml(item.label)}</div>
         </div>
-        <button class="todo-action" onclick="openTodoSessionSheet('${item.studentId}', ${item.sessionNumber}, '${escapeAttr(item.name)}')">استكمال</button>
+        <button class="todo-action" onclick="openTodoSessionSheet('${item.studentId}', ${item.sessionNumber}, '${escapeJsString(item.name)}')">استكمال</button>
       </div>
     `;
   }
@@ -2116,7 +2236,7 @@ function renderTodoRow(item, idx){
         </div>
         <div class="todo-row-actions">
           <button class="todo-action-icon" onclick="quickWhatsAppFromTodo('${item.studentId}')" title="واتساب">💬</button>
-          <button class="todo-action" onclick="openTodoContactSheet('${item.studentId}', '${escapeAttr(item.name)}')">تسجيل التواصل</button>
+          <button class="todo-action" onclick="openTodoContactSheet('${item.studentId}', '${escapeJsString(item.name)}')">تسجيل التواصل</button>
         </div>
       </div>
     `;
@@ -2156,10 +2276,11 @@ async function submitTodoPhone(studentId){
   if(btn){ btn.disabled = true; btn.textContent = 'جارٍ الحفظ...'; }
 
   const result = await updateStudentField(studentId, { parent_phone: val });
-  const student = students.find(s => s.id === studentId);
-  if(student){
-    student.parent_phone = val;
-    if(student.roster_id){
+  // لا نُعدّل student.parent_phone هنا يدوياً: updateStudentField تكفّلت بذلك بالفعل،
+  // وتقوم بالتراجع تلقائياً إن فشل الحفظ فعلياً - أي تعديل هنا كان سيُلغي ذلك التراجع
+  if(result && result.savedLocally !== false){
+    const student = students.find(s => s.id === studentId);
+    if(student && student.roster_id){
       const rosterRow = await idbGet('roster', student.roster_id);
       if(rosterRow){
         rosterRow.parent_phone = val;
@@ -2235,8 +2356,8 @@ async function submitTodoContact(studentId, status){
 
   const note = document.getElementById('todoContactNote').value;
   const result = await updateStudentField(studentId, { parent_call_status: status, parent_call_notes: note });
-  const student = students.find(s => s.id === studentId);
-  if(student){ student.parent_call_status = status; student.parent_call_notes = note; }
+  // لا حاجة لتعديل student يدوياً هنا: updateStudentField عدّلته بالفعل،
+  // وتراجعت عن التعديل تلقائياً إن فشل الحفظ فعلياً
 
   todoContactSubmitting = false;
   closeModal('modalTodoSheet');
@@ -2474,7 +2595,7 @@ function renderSummary(){
 
     const optionsHtml = field.options.map(opt => `
       <button type="button" class="summary-opt ${opt === currentStatus ? 'active' : ''}"
-        onclick="setSummaryStatus('${field.key}', '${escapeAttr(opt)}')">${escapeHtml(opt)}</button>
+        onclick="setSummaryStatus('${field.key}', '${escapeJsString(opt)}')">${escapeHtml(opt)}</button>
     `).join('');
 
     card.innerHTML = `
@@ -2523,9 +2644,20 @@ function escapeHtml(str){
   return div.innerHTML;
 }
 
-function escapeAttr(str){
-  if(!str) return '';
-  return String(str).replace(/'/g, "\\'");
+// escape آمن للاستخدام داخل onclick="func('...')" — يهرب كل حرف يمكن أن يكسر
+// حدود الـ JS string literal أو يفلت إلى HTML (backslash, quotes, newlines, </>)
+// هذا أقوى من مجرد الهروب من علامة الاقتباس المفردة لأنه يمنع أيضاً استغلال
+// backslash-escaping أو أحرف تحكم لكسر الـ attribute نفسه.
+function escapeJsString(str){
+  if(str === null || str === undefined) return '';
+  return String(str)
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/"/g, '&quot;')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 let toastTimeout;
