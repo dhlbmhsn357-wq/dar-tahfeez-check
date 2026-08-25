@@ -22,6 +22,13 @@ self.addEventListener('install', (event) => {
   );
 });
 
+// استقبال طلب التفعيل الفوري من الصفحة (عند اكتشاف نسخة جديدة)
+self.addEventListener('message', (event) => {
+  if(event.data && event.data.type === 'SKIP_WAITING'){
+    self.skipWaiting();
+  }
+});
+
 // عند التفعيل: حذف أي نسخ كاش قديمة
 self.addEventListener('activate', (event) => {
   event.waitUntil(
