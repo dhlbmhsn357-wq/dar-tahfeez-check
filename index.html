@@ -225,6 +225,15 @@
     flex-shrink:0;
   }
   .logout-btn:hover{background:var(--red-bg);color:var(--red);}
+  .topbar-actions{display:flex;align-items:center;gap:4px;flex-shrink:0;}
+  .refresh-btn{
+    background:none;border:none;color:var(--muted);
+    padding:7px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;
+    min-height:36px;min-width:36px;
+  }
+  .refresh-btn:hover{background:var(--gold-soft);color:var(--gold-deep);}
+  .refresh-btn.spinning svg{animation:spin 0.8s linear infinite;}
+  @keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
 
   /* breadcrumb / back */
   .crumb{
@@ -730,7 +739,12 @@
           <span><span class="status-dot" id="statusDot"></span><span id="statusText">متصل</span></span>
         </div>
       </div>
-      <button class="logout-btn" onclick="handleLogout()">تسجيل خروج</button>
+      <div class="topbar-actions">
+        <button class="refresh-btn" id="refreshBtn" onclick="manualRefresh()" title="تحديث البيانات من السحابة">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+        </button>
+        <button class="logout-btn" onclick="handleLogout()">تسجيل خروج</button>
+      </div>
     </div>
   </header>
 
@@ -1026,6 +1040,8 @@ async function processSyncQueue(){
   if(allSucceeded){
     // بعد المزامنة الناجحة الكاملة، نعيد تحميل البيانات الطازجة من السحابة
     await refreshFromCloud();
+    // ونعيد رسم الشاشة الحالية حتى تظهر أي تغييرات جاءت من أجهزة أخرى
+    if(typeof refreshCurrentView === 'function') await refreshCurrentView();
   }
 
   return allSucceeded;
@@ -1038,6 +1054,27 @@ async function processSyncQueue(){
    مهم جداً: لا نكتب فوق أي صف له تعديل محلي لم يُرفع بعد (موجود في sync_queue)،
    وإلا فقدنا التعديلات الحديثة عند سحب نسخة أقدم من السحابة.
    ============================================ */
+/* ============================================
+   يسحب كل صفوف جدول من Supabase على دفعات (pagination)،
+   لتجاوز الحد الافتراضي (1000 صف) الذي كان يمنع ظهور أحدث الشهور
+   عندما يكبر جدول session_records.
+   يرجّع { data, error } — إذا حدث أي خطأ في أي دفعة نُرجعه ولا نكتب بيانات ناقصة.
+   ============================================ */
+async function fetchAllRows(tableName){
+  const PAGE = 1000;
+  let all = [];
+  let from = 0;
+  while(true){
+    const res = await sb.from(tableName).select('*').range(from, from + PAGE - 1);
+    if(res.error) return { data: null, error: res.error };
+    const batch = res.data || [];
+    all = all.concat(batch);
+    if(batch.length < PAGE) break; // آخر دفعة
+    from += PAGE;
+  }
+  return { data: all, error: null };
+}
+
 async function refreshFromCloud(){
   if(!isOnline) return;
   try{
@@ -1054,21 +1091,32 @@ async function refreshFromCloud(){
       return pendingKeys[tableName] && row && row.id && pendingKeys[tableName].has(row.id);
     };
 
+    // نسحب كل الجداول بالكامل (مع pagination) بالتوازي
     const [rosterRes, monthsRes, studentsRes, recordsRes, summaryRes] = await Promise.all([
-      sb.from('roster').select('*'),
-      sb.from('months').select('*'),
-      sb.from('students').select('*'),
-      sb.from('session_records').select('*'),
-      sb.from('month_summary').select('*')
+      fetchAllRows('roster'),
+      fetchAllRows('months'),
+      fetchAllRows('students'),
+      fetchAllRows('session_records'),
+      fetchAllRows('month_summary')
     ]);
+
+    // لو حصل خطأ في أي جدول، نوقف ولا نكتب بيانات ناقصة قد تُظهر شهراً بدون سجلاته
+    const firstError = [rosterRes, monthsRes, studentsRes, recordsRes, summaryRes].find(r => r.error);
+    if(firstError){
+      console.error('refreshFromCloud: خطأ في سحب أحد الجداول', firstError.error);
+      return { ok: false, error: firstError.error };
+    }
 
     if(rosterRes.data) for(const r of rosterRes.data) if(!skipIfPending('roster', r)) await idbPut('roster', r);
     if(monthsRes.data) for(const m of monthsRes.data) if(!skipIfPending('months', m)) await idbPut('months', m);
     if(studentsRes.data) for(const s of studentsRes.data) if(!skipIfPending('students', s)) await idbPut('students', s);
     if(recordsRes.data) for(const r of recordsRes.data) if(!skipIfPending('session_records', r)) await idbPut('session_records', r);
     if(summaryRes.data) for(const sm of summaryRes.data) if(!skipIfPending('month_summary', sm)) await idbPut('month_summary', sm);
+
+    return { ok: true };
   } catch(err){
     console.error('Error refreshing from cloud', err);
+    return { ok: false, error: err };
   }
 }
 
@@ -1179,7 +1227,65 @@ async function initApp(){
 
   if(hasSession && isOnline){
     await refreshFromCloud();
+    // مهم جداً: بعد سحب أحدث البيانات، نعيد رسم الواجهة حسب الشاشة الحالية.
+    // بدون هذا كان المستخدم يظل يرى النسخة القديمة المرسومة من الكاش قبل انتهاء المزامنة
+    // (وهو سبب رؤية شهر قديم فقط رغم عمل refresh).
+    await refreshCurrentView();
     processSyncQueue();
+  }
+}
+
+/* يعيد رسم الشاشة الحالية بأحدث البيانات بعد المزامنة، أياً كان مكان المستخدم */
+async function refreshCurrentView(){
+  // إذا كان المستخدم داخل شهر معيّن، نعيد تحميل بياناته وإلا نعيد رسم قائمة الشهور
+  if(currentMonth){
+    // نتأكد أن الشهر الحالي ما زال موجوداً بعد التحديث
+    const fresh = await idbGet('months', currentMonth.id);
+    if(fresh){
+      currentMonth = fresh;
+      await loadStudents();
+      if(activeTab === 'summary') await loadSummary();
+      else if(activeTab === 'report') renderReport();
+      else if(activeTab === 'todo') renderTodo();
+    } else {
+      // الشهر لم يعد موجوداً (حُذف من جهاز آخر) - نرجع لقائمة الشهور
+      currentMonth = null;
+      await loadMonths();
+    }
+  } else {
+    await loadMonths();
+  }
+}
+
+/* تحديث يدوي يجبر سحب أحدث البيانات من السحابة، مع مؤشر بصري وتغذية راجعة واضحة */
+let manualRefreshing = false;
+async function manualRefresh(){
+  if(manualRefreshing) return;
+  if(!isOnline){
+    showToast('لا يوجد اتصال بالإنترنت — لا يمكن التحديث الآن');
+    return;
+  }
+  manualRefreshing = true;
+  const btn = document.getElementById('refreshBtn');
+  if(btn) btn.classList.add('spinning');
+
+  try{
+    // نرفع أي تعديلات معلقة أولاً، ثم نسحب أحدث نسخة كاملة
+    await processSyncQueue();
+    const result = await refreshFromCloud();
+    await refreshCurrentView();
+
+    if(result && result.ok === false){
+      showToast('تعذّر التحديث بالكامل — تحقق من الاتصال وحاول مجدداً');
+    } else {
+      showToast('تم تحديث البيانات ✓');
+    }
+  } catch(err){
+    console.error('manualRefresh failed', err);
+    showToast('حدث خطأ أثناء التحديث — حاول مرة أخرى');
+  } finally {
+    manualRefreshing = false;
+    if(btn) btn.classList.remove('spinning');
   }
 }
 
