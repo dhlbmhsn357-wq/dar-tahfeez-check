@@ -2814,11 +2814,47 @@ function dismissInstallBanner(){
 
 /* ============================================
    تسجيل Service Worker (يسمح بفتح التطبيق بدون نت)
+   مع تحديث تلقائي: عند وجود نسخة جديدة من التطبيق، نفعّلها فوراً
+   ونعيد تحميل الصفحة مرة واحدة تلقائياً، حتى لا يحتاج المستخدم
+   (خصوصاً على iPhone/Safari) لأي مسح كاش يدوي.
    ============================================ */
 if('serviceWorker' in navigator){
+  let refreshingDueToSW = false;
+
+  // عندما يتولّى Service Worker جديد التحكّم، نعيد التحميل مرة واحدة فقط
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if(refreshingDueToSW) return;
+    refreshingDueToSW = true;
+    window.location.reload();
+  });
+
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch((err) => {
+    navigator.serviceWorker.register('./sw.js').then((reg) => {
+      // نطلب فحص وجود تحديث فوراً عند كل فتح
+      reg.update().catch(()=>{});
+
+      // لو فيه نسخة جديدة قيد التثبيت، نفعّلها فور جاهزيتها
+      reg.addEventListener('updatefound', () => {
+        const newWorker = reg.installing;
+        if(!newWorker) return;
+        newWorker.addEventListener('statechange', () => {
+          if(newWorker.state === 'installed' && navigator.serviceWorker.controller){
+            // نسخة جديدة جاهزة وهناك نسخة قديمة تعمل حالياً → نفعّل الجديدة فوراً
+            newWorker.postMessage({ type: 'SKIP_WAITING' });
+          }
+        });
+      });
+    }).catch((err) => {
       console.error('Service worker registration failed:', err);
+    });
+
+    // فحص دوري للتحديث كل مرة يرجع فيها التطبيق للواجهة
+    document.addEventListener('visibilitychange', () => {
+      if(document.visibilityState === 'visible'){
+        navigator.serviceWorker.getRegistration().then((reg) => {
+          if(reg) reg.update().catch(()=>{});
+        });
+      }
     });
   });
 }
