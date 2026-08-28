@@ -226,6 +226,26 @@
   }
   .logout-btn:hover{background:var(--red-bg);color:var(--red);}
   .topbar-actions{display:flex;align-items:center;gap:4px;flex-shrink:0;}
+  #startupError{
+    display:none;position:fixed;inset:0;z-index:9999;
+    background:var(--bg);align-items:center;justify-content:center;padding:24px;
+  }
+  .startup-error-box{
+    background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-lg);
+    padding:32px 24px;max-width:360px;width:100%;text-align:center;box-shadow:var(--shadow-lg);
+  }
+  .startup-error-icon{font-size:36px;margin-bottom:12px;}
+  .startup-error-title{font-size:18px;font-weight:800;color:var(--ink);margin-bottom:8px;}
+  .startup-error-msg{font-size:13.5px;color:var(--text-secondary);line-height:1.6;}
+  .sync-tools{margin-top:28px;padding-top:18px;border-top:1px solid var(--line);text-align:center;}
+  .sync-tools-btn{
+    display:inline-flex;align-items:center;gap:7px;
+    padding:9px 16px;border-radius:var(--radius-pill);
+    border:1.5px solid var(--line);background:var(--surface);
+    color:var(--gold-deep);font-size:12.5px;font-weight:600;
+  }
+  .sync-tools-btn:hover{background:var(--gold-soft);border-color:var(--gold);}
+  .sync-tools-hint{font-size:11px;color:var(--muted);margin-top:7px;line-height:1.5;}
   .refresh-btn{
     background:none;border:none;color:var(--muted);
     padding:7px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;
@@ -743,6 +763,16 @@
 </head>
 <body>
 
+<!-- ============ STARTUP ERROR BOUNDARY ============ -->
+<div id="startupError" style="display:none;">
+  <div class="startup-error-box">
+    <div class="startup-error-icon">⚠️</div>
+    <div class="startup-error-title">تعذّر فتح التطبيق</div>
+    <div class="startup-error-msg">حدث خطأ غير متوقع أثناء التحميل.</div>
+    <button class="btn-primary" onclick="location.reload()" style="margin-top:16px;">إعادة المحاولة</button>
+  </div>
+</div>
+
 <div id="connBanner"></div>
 
 <!-- ============ LOGIN SCREEN ============ -->
@@ -784,6 +814,13 @@
     <div id="monthsView">
       <div class="section-title">الشهور</div>
       <div class="months-grid" id="monthsGrid"></div>
+      <div class="sync-tools">
+        <button class="sync-tools-btn" onclick="forcePushAllLocal()" title="ارفع كل بيانات هذا الجهاز إلى السحابة">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+          مزامنة بيانات هذا الجهاز للسحابة
+        </button>
+        <div class="sync-tools-hint">استخدمه مرة واحدة لو كانت بيانات هذا الجهاز لا تظهر على الأجهزة الأخرى</div>
+      </div>
     </div>
 
     <!-- ----- Inside a month: tabs (students / summary) ----- -->
@@ -1308,21 +1345,92 @@ const SUMMARY_FIELDS = [
    تهيئة التطبيق
    ============================================ */
 async function initApp(){
-  await openIDB();
-  updateConnectionUI();
+  // حماية الإقلاع: التطبيق يجب أن يفتح دائماً من البيانات المحلية،
+  // حتى لو فشل فتح قاعدة البيانات المحلية أو أي خطوة تهيئة أخرى.
+  // (الدرس: لا نترك المستخدم أمام شاشة فارغة بلا سبب واضح عند الفتح أوفلاين)
+  try{
+    await openIDB();
+  } catch(err){
+    console.error('openIDB failed at startup', err);
+    showStartupError('تعذّر فتح قاعدة البيانات المحلية على هذا المتصفح. جرّب إغلاق وضع التصفح الخفي أو إفراغ مساحة تخزين، ثم أعد الفتح.');
+    return;
+  }
 
-  // لا نُحمّل بيانات السحابة إلا بعد التأكد أن هناك جلسة صالحة بالفعل،
-  // حتى لا يتم تنزيل بيانات كل الطلاب لجهاز أي زائر يفتح الرابط قبل تسجيل الدخول
-  const hasSession = checkSession();
+  try{
+    updateConnectionUI();
 
-  if(hasSession && isOnline){
-    await refreshFromCloud();
-    // مهم جداً: بعد سحب أحدث البيانات، نعيد رسم الواجهة حسب الشاشة الحالية.
-    // بدون هذا كان المستخدم يظل يرى النسخة القديمة المرسومة من الكاش قبل انتهاء المزامنة
-    // (وهو سبب رؤية شهر قديم فقط رغم عمل refresh).
-    await refreshCurrentView();
-    processSyncQueue();
-    startAutoSync();
+    // لا نُحمّل بيانات السحابة إلا بعد التأكد من وجود جلسة صالحة محلياً.
+    // checkSession تقرأ من localStorage مباشرة (بدون أي نداء شبكة)، فهي لا تفشل أوفلاين.
+    const hasSession = checkSession();
+
+    // كل ما يلي متعلق بالشبكة فقط، ومحاط بحمايته الخاصة حتى لا يمنع فتح التطبيق أوفلاين
+    if(hasSession && isOnline){
+      try{
+        // إصلاح لمرة واحدة: ترفع الأجهزة القديمة بياناتها المحلية الصحيحة للسحابة
+        await runOneTimeRecoveryPush();
+        await refreshFromCloud();
+        await refreshCurrentView();
+        processSyncQueue();
+        startAutoSync();
+      } catch(netErr){
+        // فشل الشبكة عند الفتح لا يجب أن يمنع استخدام التطبيق — البيانات المحلية كافية
+        console.error('startup network step failed (continuing offline)', netErr);
+      }
+    }
+  } catch(err){
+    console.error('initApp unexpected error', err);
+    // حتى لو حدث خطأ غير متوقع، نحاول عرض التطبيق من المحلي بدل تركه معلقاً
+    try{ if(localStorage.getItem('dar_alarqam_logged_in') === 'true') showApp(); }catch(e){}
+  }
+}
+
+/* شبكة أمان أخيرة: لو علّق الإقلاع لأي سبب، نعرض رسالة واضحة بدل شاشة فارغة للأبد */
+function showStartupError(msg){
+  try{
+    const el = document.getElementById('startupError');
+    if(el){
+      el.querySelector('.startup-error-msg').textContent = msg;
+      el.style.display = 'flex';
+      return;
+    }
+  }catch(e){}
+  // بديل احتياطي لو عنصر الرسالة نفسه غير متاح
+  alert(msg);
+}
+
+/* رفع استرجاعي لمرة واحدة فقط لكل جهاز (يُعلَّم في meta بعد نجاحه) */
+async function runOneTimeRecoveryPush(){
+  try{
+    const flag = await idbGet('meta', 'recovery_push_done');
+    if(flag && flag.value === true) return; // تم بالفعل على هذا الجهاز
+
+    const tables = [
+      { name: 'roster', conflict: 'id' },
+      { name: 'months', conflict: 'id' },
+      { name: 'students', conflict: 'id' },
+      { name: 'session_records', conflict: 'student_id,session_number' },
+      { name: 'month_summary', conflict: 'month_id' }
+    ];
+
+    let hadError = false;
+    for(const t of tables){
+      const rows = await idbGetAll(t.name);
+      if(!rows.length) continue;
+      const BATCH = 500;
+      for(let i = 0; i < rows.length; i += BATCH){
+        const chunk = rows.slice(i, i + BATCH);
+        const res = await sb.from(t.name).upsert(chunk, { onConflict: t.conflict }).select();
+        if(res.error){ console.error('recovery push error', t.name, res.error); hadError = true; }
+      }
+    }
+
+    // نعلّم النجاح فقط لو تم بدون أخطاء، حتى يُعاد المحاولة لاحقاً إن فشل جزئياً
+    if(!hadError){
+      await idbPut('meta', { key: 'recovery_push_done', value: true });
+    }
+  } catch(err){
+    console.error('runOneTimeRecoveryPush failed', err);
+    // لا نعلّمها كمنتهية حتى تُعاد المحاولة في الفتح القادم
   }
 }
 
@@ -1376,6 +1484,78 @@ async function manualRefresh(){
     showToast('حدث خطأ أثناء التحديث — حاول مرة أخرى');
   } finally {
     manualRefreshing = false;
+    if(btn) btn.classList.remove('spinning');
+  }
+}
+
+/* ============================================
+   إعادة رفع كامل للبيانات المحلية إلى السحابة (Force Push)
+   يُستخدم لإصلاح الأجهزة التي تحتوي على بيانات صحيحة محلياً لكنها
+   لم تُرفع للسحابة (بسبب عمليات فشلت سابقاً قبل إضافة القيود).
+   يتخطى طابور المزامنة تماماً ويرفع كل شيء مباشرة عبر upsert.
+   ============================================ */
+let forcePushing = false;
+async function forcePushAllLocal(){
+  if(forcePushing) return;
+  if(!isOnline){
+    showToast('لا يوجد اتصال بالإنترنت — لا يمكن الرفع الآن');
+    return;
+  }
+
+  const ok = confirm('سيتم رفع كل البيانات الموجودة على هذا الجهاز إلى السحابة ودمجها مع باقي الأجهزة. هل تريد المتابعة؟');
+  if(!ok) return;
+
+  forcePushing = true;
+  const btn = document.getElementById('refreshBtn');
+  if(btn) btn.classList.add('spinning');
+  showToast('جارٍ رفع كل البيانات المحلية...');
+
+  // خريطة الجداول ومفاتيح التعارض (نفس ما يستخدمه التطبيق)
+  const tables = [
+    { name: 'roster', conflict: 'id' },
+    { name: 'months', conflict: 'id' },
+    { name: 'students', conflict: 'id' },
+    { name: 'session_records', conflict: 'student_id,session_number' },
+    { name: 'month_summary', conflict: 'month_id' }
+  ];
+
+  let totalUploaded = 0;
+  let hadError = false;
+
+  try{
+    for(const t of tables){
+      const rows = await idbGetAll(t.name);
+      if(!rows.length) continue;
+
+      // نرفع على دفعات (500 صف) لتفادي الطلبات الضخمة
+      const BATCH = 500;
+      for(let i = 0; i < rows.length; i += BATCH){
+        const chunk = rows.slice(i, i + BATCH);
+        const res = await sb.from(t.name).upsert(chunk, { onConflict: t.conflict }).select();
+        if(res.error){
+          console.error('forcePush error for', t.name, res.error);
+          hadError = true;
+          // نكمل باقي الجداول رغم الخطأ
+        } else {
+          totalUploaded += chunk.length;
+        }
+      }
+    }
+
+    // بعد الرفع، نسحب أحدث نسخة موحّدة ونعيد الرسم
+    await refreshFromCloud();
+    await refreshCurrentView();
+
+    if(hadError){
+      showToast(`تم رفع ${totalUploaded} سجل، مع بعض الأخطاء — راجع الاتصال وأعد المحاولة`);
+    } else {
+      showToast(`تم رفع ${totalUploaded} سجل بنجاح ومزامنة كل الأجهزة ✓`);
+    }
+  } catch(err){
+    console.error('forcePushAllLocal failed', err);
+    showToast('حدث خطأ أثناء الرفع — حاول مرة أخرى');
+  } finally {
+    forcePushing = false;
     if(btn) btn.classList.remove('spinning');
   }
 }
@@ -1480,6 +1660,10 @@ function checkSession(){
     localStorage.removeItem('dar_alarqam_logged_in');
     localStorage.removeItem('dar_alarqam_session_at');
   }
+  // لا توجد جلسة: نعرض شاشة الدخول ونلغي مؤقّت الإقلاع (الإقلاع نجح)
+  if(typeof clearStartupWatchdog === 'function') clearStartupWatchdog();
+  const loginScreen = document.getElementById('loginScreen');
+  if(loginScreen) loginScreen.style.display = 'flex';
   return false;
 }
 
@@ -1511,6 +1695,7 @@ async function handleLogin(){
       if(!error && data){
         await idbPut('meta', { key: 'cached_user', value: { username, password } });
         setSession();
+        await runOneTimeRecoveryPush();
         await refreshFromCloud();
         showApp();
         processSyncQueue();
@@ -1552,9 +1737,13 @@ function handleLogout(){
 }
 
 function showApp(){
+  if(typeof clearStartupWatchdog === 'function') clearStartupWatchdog();
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('appScreen').style.display = 'block';
-  loadMonths();
+  loadMonths().catch(err => {
+    console.error('loadMonths failed', err);
+    showToast('تعذّر تحميل الشهور — حاول تحديث الصفحة');
+  });
 }
 
 /* ============================================
@@ -3127,9 +3316,30 @@ if('serviceWorker' in navigator){
 }
 
 /* ============================================
-   بدء التطبيق
+   بدء التطبيق (مع شبكة أمان زمنية)
    ============================================ */
-initApp();
+// لو علّق الإقلاع لأي سبب غير متوقع لأكثر من 12 ثانية، نعرض رسالة واضحة
+// بدل ترك المستخدم أمام شاشة فارغة. تُلغى هذه المؤقتة فور ظهور التطبيق.
+let startupWatchdog = setTimeout(() => {
+  const loginVisible = document.getElementById('loginScreen') && document.getElementById('loginScreen').offsetParent !== null;
+  const appVisible = document.getElementById('appScreen') && document.getElementById('appScreen').style.display === 'block';
+  if(!loginVisible && !appVisible){
+    showStartupError('استغرق التحميل وقتاً أطول من المعتاد. تأكد من الاتصال أو أعد المحاولة.');
+  }
+}, 12000);
+
+function clearStartupWatchdog(){
+  if(startupWatchdog){ clearTimeout(startupWatchdog); startupWatchdog = null; }
+}
+
+initApp()
+  .then(clearStartupWatchdog)
+  .catch((err) => {
+    console.error('initApp rejected', err);
+    clearStartupWatchdog();
+    // محاولة أخيرة لعرض التطبيق من المحلي
+    try{ if(localStorage.getItem('dar_alarqam_logged_in') === 'true') showApp(); }catch(e){}
+  });
 </script>
 </body>
 </html>
