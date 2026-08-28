@@ -477,6 +477,36 @@
   }
   .btn-secondary:hover{background:var(--surface-elevated);}
 
+  /* ===== Student migration selector (add-month modal) ===== */
+  .migrate-modes{display:flex;flex-direction:column;gap:6px;margin-bottom:6px;}
+  .migrate-mode{
+    display:flex;align-items:center;gap:9px;padding:11px 12px;
+    border:1.5px solid var(--line);border-radius:var(--radius-sm);cursor:pointer;
+    font-size:13.5px;color:var(--ink);background:var(--surface);transition:border-color .12s, background-color .12s;
+  }
+  .migrate-mode input{width:auto;margin:0;flex-shrink:0;accent-color:var(--gold);}
+  .migrate-mode:has(input:checked){border-color:var(--gold);background:var(--gold-soft);font-weight:600;}
+  .migrate-select-toolbar{margin-top:10px;}
+  .migrate-select-actions{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;}
+  .migrate-chip-btn{
+    padding:6px 12px;border-radius:var(--radius-pill);border:1.5px solid var(--line);
+    background:var(--surface);font-size:12px;font-weight:600;color:var(--gold-deep);
+  }
+  .migrate-chip-btn:hover{background:var(--gold-soft);border-color:var(--gold);}
+  .migrate-count{font-size:12px;color:var(--muted);font-weight:600;margin-right:auto;}
+  .migrate-list{
+    max-height:240px;overflow-y:auto;border:1px solid var(--line);border-radius:var(--radius-sm);
+    display:flex;flex-direction:column;
+  }
+  .migrate-item{
+    display:flex;align-items:center;gap:10px;padding:10px 12px;font-size:13.5px;
+    border-bottom:1px solid var(--line);cursor:pointer;color:var(--ink);
+  }
+  .migrate-item:last-child{border-bottom:none;}
+  .migrate-item input{width:auto;margin:0;flex-shrink:0;accent-color:var(--gold);}
+  .migrate-item.checked{background:var(--gold-soft);}
+  .migrate-empty{padding:20px;text-align:center;color:var(--muted);font-size:13px;}
+
   /* ===== Parent call segment ===== */
   .call-seg{
     display:flex;border-radius:8px;overflow:hidden;border:1px solid var(--line);margin-bottom:10px;
@@ -799,10 +829,35 @@
     <h3>إضافة شهر جديد</h3>
     <input type="text" id="newMonthName" placeholder="اسم الشهر، مثال: شهر ٧">
     <input type="number" id="newMonthSessions" placeholder="عدد الحصص" value="14">
-    <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:14px;color:var(--text-secondary,#555);cursor:pointer;">
-      <input type="checkbox" id="newMonthEmpty" style="width:auto;margin:0;">
-      ابدأ بشهر فاضي (بدون سحب أسماء الطلاب تلقائياً)
-    </label>
+
+    <div class="field-label" style="margin-top:12px;margin-bottom:8px;">من يُرحّل لهذا الشهر؟</div>
+    <div class="migrate-modes">
+      <label class="migrate-mode">
+        <input type="radio" name="migrateMode" value="all" checked onchange="onMigrateModeChange()">
+        <span>كل الطلاب الحاليين</span>
+      </label>
+      <label class="migrate-mode">
+        <input type="radio" name="migrateMode" value="custom" onchange="onMigrateModeChange()">
+        <span>اختيار طلاب محددين فقط</span>
+      </label>
+      <label class="migrate-mode">
+        <input type="radio" name="migrateMode" value="empty" onchange="onMigrateModeChange()">
+        <span>شهر فاضي (بدون أي طلاب)</span>
+      </label>
+    </div>
+
+    <div id="migrateSelectBox" style="display:none;">
+      <div class="migrate-select-toolbar">
+        <input type="text" id="migrateSearch" placeholder="ابحث عن طالب..." oninput="renderMigrateList()" style="margin-bottom:8px;">
+        <div class="migrate-select-actions">
+          <button type="button" class="migrate-chip-btn" onclick="migrateSelectAll(true)">تحديد الكل</button>
+          <button type="button" class="migrate-chip-btn" onclick="migrateSelectAll(false)">إلغاء الكل</button>
+          <span class="migrate-count" id="migrateCount">0 محدد</span>
+        </div>
+      </div>
+      <div class="migrate-list" id="migrateList"></div>
+    </div>
+
     <div class="field-label" style="margin-top:6px;" id="newMonthHint">سيتم سحب كل أسماء الطلاب الحالية تلقائياً لهذا الشهر</div>
     <div class="modal-actions">
       <button class="btn-secondary" onclick="closeModal('modalAddMonth')">إلغاء</button>
@@ -971,6 +1026,11 @@ window.addEventListener('online', () => {
   isOnline = true;
   updateConnectionUI();
   processSyncQueue();
+  // لو كان المستخدم مسجّل دخول بالفعل، نتأكد أن التزامن التلقائي يعمل
+  if(localStorage.getItem('dar_alarqam_logged_in') === 'true'){
+    startAutoSync();
+    backgroundSync();
+  }
 });
 window.addEventListener('offline', () => {
   isOnline = false;
@@ -1006,8 +1066,30 @@ async function processSyncQueue(){
       let result;
       if(op.action === 'upsert'){
         result = await sb.from(op.table).upsert(op.payload, op.conflictKey ? { onConflict: op.conflictKey } : undefined).select();
+
+        // إذا فشل الـ upsert (غالباً بسبب عدم وجود UNIQUE constraint مطابق في قاعدة البيانات
+        // على الأعمدة المذكورة في onConflict)، نلجأ لبديل موثوق: حذف الصف المطابق ثم إدخاله.
+        // هذا يعطي نفس نتيجة upsert لكن دون الاعتماد على وجود constraint، فلا تبقى العملية عالقة.
+        if(result && result.error && op.conflictKey){
+          const cols = op.conflictKey.split(',').map(c => c.trim());
+          try{
+            let delQuery = sb.from(op.table).delete();
+            for(const col of cols){
+              if(op.payload[col] !== undefined) delQuery = delQuery.eq(col, op.payload[col]);
+            }
+            await delQuery;
+            const retry = await sb.from(op.table).insert(op.payload).select();
+            result = retry; // نتيجة المحاولة البديلة هي الفاصلة الآن
+          } catch(fallbackErr){
+            console.error('upsert fallback (delete+insert) failed', op, fallbackErr);
+          }
+        }
       } else if(op.action === 'insert'){
         result = await sb.from(op.table).insert(op.payload).select();
+        // لو الإدخال فشل لأن الصف موجود بالفعل (تكرار مفتاح)، نعتبره نجاحاً منطقياً
+        if(result && result.error && (result.error.code === '23505' || /duplicate/i.test(result.error.message || ''))){
+          result = { error: null, data: [] };
+        }
       } else if(op.action === 'update'){
         result = await sb.from(op.table).update(op.payload.values).eq('id', op.payload.id).select();
       } else if(op.action === 'delete'){
@@ -1018,8 +1100,17 @@ async function processSyncQueue(){
 
       if(result && result.error){
         console.error('Sync error for op', op, result.error);
-        // نكمل لباقي العمليات، ونسيب العملية الفاشلة في الطابور لإعادة المحاولة لاحقاً
         allSucceeded = false;
+
+        // نتتبّع عدد مرات الفشل المتتالي لهذه العملية. إذا فشلت كثيراً (10 مرات)،
+        // نزيلها من الطابور حتى لا تبقى عالقة للأبد وتُبطئ كل مزامنة تالية.
+        op.failCount = (op.failCount || 0) + 1;
+        if(op.failCount >= 10){
+          console.warn('إسقاط عملية مزامنة فاشلة بشكل دائم بعد 10 محاولات', op);
+          await idbDelete('sync_queue', op.localId);
+        } else {
+          await idbPut('sync_queue', op); // نحفظ عدّاد الفشل المحدّث
+        }
         continue;
       }
 
@@ -1037,12 +1128,11 @@ async function processSyncQueue(){
   isSyncing = false;
   updateConnectionUI();
 
-  if(allSucceeded){
-    // بعد المزامنة الناجحة الكاملة، نعيد تحميل البيانات الطازجة من السحابة
-    await refreshFromCloud();
-    // ونعيد رسم الشاشة الحالية حتى تظهر أي تغييرات جاءت من أجهزة أخرى
-    if(typeof refreshCurrentView === 'function') await refreshCurrentView();
-  }
+  // نسحب أحدث البيانات من السحابة دائماً — حتى لو فشلت بعض العمليات الصادرة.
+  // القراءة (السحب) مستقلة تماماً عن الكتابة (الرفع)، وكان ربطهما معاً يعني أن
+  // عملية واحدة عالقة في الطابور تمنع الجهاز من رؤية أي تحديثات من الأجهزة الأخرى.
+  await refreshFromCloud();
+  if(typeof refreshCurrentView === 'function') await refreshCurrentView();
 
   return allSucceeded;
 }
@@ -1232,6 +1322,7 @@ async function initApp(){
     // (وهو سبب رؤية شهر قديم فقط رغم عمل refresh).
     await refreshCurrentView();
     processSyncQueue();
+    startAutoSync();
   }
 }
 
@@ -1290,6 +1381,84 @@ async function manualRefresh(){
 }
 
 /* ============================================
+   التزامن التلقائي بين الأجهزة (بدون تدخل من المستخدم)
+   طبقتان:
+   1) Polling دوري كل 20 ثانية: يضمن أن أي جهاز مفتوح يرى تعديلات
+      باقي الأجهزة خلال 20 ثانية كحد أقصى (يعمل دائماً حتى لو Realtime معطّل).
+   2) Supabase Realtime: يوصّل التعديلات فوراً (خلال ثانية) عند توفره.
+   التحديث هنا "صامت": لا يُظهر أي إشعار مزعج، ويحترم تعديلات المستخدم
+   المعلقة فلا يدهس ما يكتبه الآن.
+   ============================================ */
+const AUTO_SYNC_INTERVAL_MS = 20000; // 20 ثانية
+let autoSyncTimer = null;
+let backgroundSyncing = false;
+let realtimeChannel = null;
+
+async function backgroundSync(){
+  // لا نزامن لو: لا يوجد نت، أو التطبيق في الخلفية، أو مزامنة أخرى شغالة الآن
+  if(!isOnline) return;
+  if(document.visibilityState !== 'visible') return;
+  if(backgroundSyncing || isSyncing || manualRefreshing) return;
+
+  backgroundSyncing = true;
+  try{
+    // نرفع أي تعديلات معلقة أولاً (حتى تصل للأجهزة الأخرى)، ثم نسحب أحدث نسخة
+    await processSyncQueue();
+    const result = await refreshFromCloud();
+    if(!result || result.ok !== false){
+      await refreshCurrentView();
+    }
+  } catch(err){
+    console.error('backgroundSync failed', err);
+  } finally {
+    backgroundSyncing = false;
+  }
+}
+
+function startAutoSync(){
+  stopAutoSync();
+  autoSyncTimer = setInterval(backgroundSync, AUTO_SYNC_INTERVAL_MS);
+  setupRealtime();
+}
+
+function stopAutoSync(){
+  if(autoSyncTimer){ clearInterval(autoSyncTimer); autoSyncTimer = null; }
+}
+
+/* اشتراك Realtime: أي تغيير في أي من الجداول يُشغّل مزامنة فورية صامتة */
+function setupRealtime(){
+  try{
+    if(realtimeChannel) return; // مشترك بالفعل
+    if(!sb || !sb.channel) return; // نسخة Supabase لا تدعم Realtime
+
+    let debounceTimer = null;
+    const onRemoteChange = () => {
+      // نُجمّع التغييرات المتتالية في نافذة قصيرة لتفادي سحب متكرر
+      if(debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => { backgroundSync(); }, 800);
+    };
+
+    realtimeChannel = sb
+      .channel('dar-alarqam-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'session_records' }, onRemoteChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'students' }, onRemoteChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'months' }, onRemoteChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'month_summary' }, onRemoteChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'roster' }, onRemoteChange)
+      .subscribe();
+  } catch(err){
+    console.error('setupRealtime failed (سيعتمد التطبيق على المزامنة الدورية بدلاً منه)', err);
+  }
+}
+
+// عند رجوع التطبيق للواجهة، نزامن فوراً بدل انتظار الدورة القادمة
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible'){
+    backgroundSync();
+  }
+});
+
+/* ============================================
    تسجيل الدخول (يعمل أيضاً بدون نت إذا كان قد سجل دخول قبل ذلك)
    ملاحظة أمنية: الجلسة الحالية مبنية على علم محلي بسيط في localStorage
    (وليست جلسة مُدارة من السيرفر)، لذلك أضفنا مدة صلاحية (7 أيام)
@@ -1345,6 +1514,7 @@ async function handleLogin(){
         await refreshFromCloud();
         showApp();
         processSyncQueue();
+        startAutoSync();
         return;
       }
       if(!error && !data){
@@ -1358,6 +1528,7 @@ async function handleLogin(){
   if(cached && cached.value.username === username && cached.value.password === password){
     setSession();
     showApp();
+    if(isOnline) startAutoSync();
     return;
   }
 
@@ -1367,6 +1538,11 @@ async function handleLogin(){
 }
 
 function handleLogout(){
+  stopAutoSync();
+  if(realtimeChannel){
+    try{ sb.removeChannel(realtimeChannel); } catch(e){}
+    realtimeChannel = null;
+  }
   localStorage.removeItem('dar_alarqam_logged_in');
   localStorage.removeItem('dar_alarqam_session_at');
   document.getElementById('appScreen').style.display = 'none';
@@ -1413,37 +1589,121 @@ function renderMonths(){
 
   const addCard = document.createElement('div');
   addCard.className = 'month-card add-new';
-  addCard.onclick = () => openModal('modalAddMonth');
+  addCard.onclick = () => openAddMonthModal();
   addCard.innerHTML = `<div class="icon">+</div><h3>شهر جديد</h3>`;
   grid.appendChild(addCard);
 }
 
 function openModal(id){ document.getElementById(id).classList.add('show'); }
-
-document.addEventListener('DOMContentLoaded', () => {
-  const emptyChk = document.getElementById('newMonthEmpty');
-  if(emptyChk){
-    emptyChk.addEventListener('change', () => {
-      document.getElementById('newMonthHint').textContent = emptyChk.checked
-        ? 'الشهر هيتعمل فاضي تماماً، وتقدر تضيف الأسماء بنفسك بعد كده'
-        : 'سيتم سحب كل أسماء الطلاب الحالية تلقائياً لهذا الشهر';
-    });
-  }
-});
 function closeModal(id){ document.getElementById(id).classList.remove('show'); }
+
+/* حالة اختيار الطلاب للترحيل: مجموعة معرّفات roster المحددة */
+let migrateRoster = [];            // كل طلاب القائمة الأساسية
+let migrateSelected = new Set();   // المحدد منهم (roster ids)
+
+async function openAddMonthModal(){
+  // إعادة ضبط الحقول
+  document.getElementById('newMonthName').value = '';
+  document.getElementById('newMonthSessions').value = '14';
+  const allRadio = document.querySelector('input[name="migrateMode"][value="all"]');
+  if(allRadio) allRadio.checked = true;
+
+  // تحميل القائمة الأساسية للطلاب وتحديد الكل مبدئياً
+  migrateRoster = await idbGetAll('roster');
+  migrateRoster.sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
+  migrateSelected = new Set(migrateRoster.map(r => r.id));
+
+  const searchEl = document.getElementById('migrateSearch');
+  if(searchEl) searchEl.value = '';
+
+  onMigrateModeChange();
+  openModal('modalAddMonth');
+}
+
+function getMigrateMode(){
+  const el = document.querySelector('input[name="migrateMode"]:checked');
+  return el ? el.value : 'all';
+}
+
+function onMigrateModeChange(){
+  const mode = getMigrateMode();
+  const box = document.getElementById('migrateSelectBox');
+  const hint = document.getElementById('newMonthHint');
+
+  box.style.display = (mode === 'custom') ? 'block' : 'none';
+
+  if(mode === 'all'){
+    hint.textContent = 'سيتم سحب كل أسماء الطلاب الحالية تلقائياً لهذا الشهر';
+  } else if(mode === 'empty'){
+    hint.textContent = 'الشهر هيتعمل فاضي تماماً، وتقدر تضيف الأسماء بنفسك بعد كده';
+  } else {
+    hint.textContent = 'اختر الطلاب الذين تريد ترحيلهم لهذا الشهر فقط';
+    renderMigrateList();
+  }
+}
+
+function renderMigrateList(){
+  const listEl = document.getElementById('migrateList');
+  const q = (document.getElementById('migrateSearch').value || '').trim();
+  const filtered = q ? migrateRoster.filter(r => (r.name || '').includes(q)) : migrateRoster;
+
+  if(migrateRoster.length === 0){
+    listEl.innerHTML = `<div class="migrate-empty">لا يوجد طلاب في القائمة الأساسية بعد</div>`;
+  } else if(filtered.length === 0){
+    listEl.innerHTML = `<div class="migrate-empty">لا يوجد طالب مطابق للبحث</div>`;
+  } else {
+    listEl.innerHTML = filtered.map(r => {
+      const checked = migrateSelected.has(r.id);
+      return `
+        <label class="migrate-item ${checked ? 'checked' : ''}">
+          <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleMigrateStudent('${r.id}', this.checked)">
+          <span>${escapeHtml(r.name)}</span>
+        </label>
+      `;
+    }).join('');
+  }
+  updateMigrateCount();
+}
+
+function toggleMigrateStudent(rosterId, checked){
+  if(checked) migrateSelected.add(rosterId);
+  else migrateSelected.delete(rosterId);
+  updateMigrateCount();
+  // نحدّث تظليل الصف بدون إعادة رسم كامل (حفاظاً على مكان التمرير)
+  renderMigrateList();
+}
+
+function migrateSelectAll(select){
+  const q = (document.getElementById('migrateSearch').value || '').trim();
+  const filtered = q ? migrateRoster.filter(r => (r.name || '').includes(q)) : migrateRoster;
+  filtered.forEach(r => {
+    if(select) migrateSelected.add(r.id);
+    else migrateSelected.delete(r.id);
+  });
+  renderMigrateList();
+}
+
+function updateMigrateCount(){
+  const el = document.getElementById('migrateCount');
+  if(el) el.textContent = `${migrateSelected.size} محدد`;
+}
 
 async function submitAddMonth(){
   const name = document.getElementById('newMonthName').value.trim();
   const sessionsRaw = document.getElementById('newMonthSessions').value.trim();
-  const startEmpty = document.getElementById('newMonthEmpty').checked;
+  const mode = getMigrateMode();
   if(!name){ showToast('من فضلك ادخل اسم الشهر'); return; }
 
-  // Validation صارم لعدد الحصص: لازم يكون رقم صحيح موجب ضمن نطاق منطقي.
-  // بدون هذا التحقق، قيمة فارغة أو صفر أو سالبة كانت تمر بصمت وتكسر كل
-  // حسابات التقرير (تقسيم على صفر) وتمنع تسجيل أي حصة للطلاب المُضافين.
+  // Validation صارم لعدد الحصص
   const sessions = sessionsRaw === '' ? 14 : parseInt(sessionsRaw, 10);
   if(!Number.isInteger(sessions) || sessions < 1 || sessions > 62){
     showToast('عدد الحصص يجب أن يكون رقماً صحيحاً بين 1 و62');
+    return;
+  }
+
+  // لو الوضع "اختيار محدد" ولم يُختر أحد، ننبّه المستخدم بدل إنشاء شهر فاضي بالخطأ
+  if(mode === 'custom' && migrateSelected.size === 0){
+    showToast('لم تختر أي طالب — حدد طلاباً أو اختر "شهر فاضي"');
     return;
   }
 
@@ -1459,36 +1719,43 @@ async function submitAddMonth(){
     return;
   }
 
-  if(!startEmpty){
-    const rosterData = await idbGetAll('roster');
-    rosterData.sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
+  // نحدد قائمة الطلاب المرشّحين للترحيل حسب الوضع المختار
+  let toMigrate = [];
+  if(mode === 'all'){
+    toMigrate = await idbGetAll('roster');
+  } else if(mode === 'custom'){
+    const all = await idbGetAll('roster');
+    toMigrate = all.filter(r => migrateSelected.has(r.id));
+  } // mode === 'empty' → تبقى فارغة
 
-    let order = 1;
-    for(const r of rosterData){
-      const studentRow = {
-        id: genId(),
-        month_id: newMonth.id,
-        roster_id: r.id,
-        display_order: order++,
-        name: r.name,
-        parent_phone: r.parent_phone,
-        notes: '',
-        parent_call_status: null,
-        parent_call_notes: '',
-        updated_at: new Date().toISOString()
-      };
-      await writeLocal('students', studentRow, 'insert');
-    }
+  toMigrate.sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
+
+  let order = 1;
+  for(const r of toMigrate){
+    const studentRow = {
+      id: genId(),
+      month_id: newMonth.id,
+      roster_id: r.id,
+      display_order: order++,
+      name: r.name,
+      parent_phone: r.parent_phone,
+      notes: '',
+      parent_call_status: null,
+      parent_call_notes: '',
+      updated_at: new Date().toISOString()
+    };
+    await writeLocal('students', studentRow, 'insert');
   }
 
   months.push(newMonth);
   renderMonths();
   closeModal('modalAddMonth');
-  document.getElementById('newMonthName').value = '';
-  document.getElementById('newMonthSessions').value = '14';
-  document.getElementById('newMonthEmpty').checked = false;
-  document.getElementById('newMonthHint').textContent = 'سيتم سحب كل أسماء الطلاب الحالية تلقائياً لهذا الشهر';
-  showToast(startEmpty ? 'تم إضافة شهر فاضي' : 'تم إضافة الشهر وسحب كل الطلاب تلقائياً');
+
+  let msg;
+  if(mode === 'empty') msg = 'تم إضافة شهر فاضي';
+  else if(mode === 'custom') msg = `تم إضافة الشهر وترحيل ${toMigrate.length} طالب`;
+  else msg = 'تم إضافة الشهر وسحب كل الطلاب تلقائياً';
+  showToast(msg);
 }
 
 /* ============================================
