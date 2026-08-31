@@ -1035,6 +1035,7 @@ function idbAddToQueue(op){
    ============================================ */
 let isOnline = navigator.onLine;
 let isSyncing = false;
+let lastSyncError = null; // تفاصيل آخر خطأ مزامنة، لعرضه عند تشخيص فشل الرفع
 
 function updateConnectionUI(){
   const dot = document.getElementById('statusDot');
@@ -1139,6 +1140,17 @@ async function processSyncQueue(){
         console.error('Sync error for op', op, result.error);
         allSucceeded = false;
 
+        // نحفظ تفاصيل آخر خطأ مزامنة لعرضه للمستخدم عند الحاجة (لتشخيص سبب فشل الرفع الحقيقي)
+        lastSyncError = {
+          table: op.table,
+          action: op.action,
+          message: result.error.message || 'خطأ غير معروف',
+          code: result.error.code || '',
+          details: result.error.details || '',
+          hint: result.error.hint || '',
+          at: new Date().toISOString()
+        };
+
         // نتتبّع عدد مرات الفشل المتتالي لهذه العملية. إذا فشلت كثيراً (10 مرات)،
         // نزيلها من الطابور حتى لا تبقى عالقة للأبد وتُبطئ كل مزامنة تالية.
         op.failCount = (op.failCount || 0) + 1;
@@ -1155,6 +1167,11 @@ async function processSyncQueue(){
       await idbDelete('sync_queue', op.localId);
     } catch(err){
       console.error('Sync exception for op', op, err);
+      lastSyncError = {
+        table: op.table, action: op.action,
+        message: (err && err.message) || String(err),
+        code: 'EXCEPTION', at: new Date().toISOString()
+      };
       // مشكلة في الشبكة وقت المزامنة - نوقف ونحاول تاني لما النت يرجع فعلياً
       isSyncing = false;
       updateConnectionUI();
@@ -1520,7 +1537,7 @@ async function forcePushAllLocal(){
   ];
 
   let totalUploaded = 0;
-  let hadError = false;
+  let firstError = null;
 
   try{
     for(const t of tables){
@@ -1534,7 +1551,7 @@ async function forcePushAllLocal(){
         const res = await sb.from(t.name).upsert(chunk, { onConflict: t.conflict }).select();
         if(res.error){
           console.error('forcePush error for', t.name, res.error);
-          hadError = true;
+          if(!firstError) firstError = { table: t.name, err: res.error };
           // نكمل باقي الجداول رغم الخطأ
         } else {
           totalUploaded += chunk.length;
@@ -1546,14 +1563,24 @@ async function forcePushAllLocal(){
     await refreshFromCloud();
     await refreshCurrentView();
 
-    if(hadError){
-      showToast(`تم رفع ${totalUploaded} سجل، مع بعض الأخطاء — راجع الاتصال وأعد المحاولة`);
+    if(firstError){
+      // نعرض السبب الحقيقي للفشل بوضوح (لتشخيص المشكلة نهائياً)
+      const e = firstError.err;
+      const reason =
+        `تعذّر رفع البيانات للسحابة.\n\n` +
+        `الجدول: ${firstError.table}\n` +
+        `الرسالة: ${e.message || '—'}\n` +
+        `الكود: ${e.code || '—'}\n` +
+        (e.details ? `التفاصيل: ${e.details}\n` : '') +
+        (e.hint ? `تلميح: ${e.hint}\n` : '') +
+        `\n(تم رفع ${totalUploaded} سجل قبل الخطأ)`;
+      alert(reason);
     } else {
       showToast(`تم رفع ${totalUploaded} سجل بنجاح ومزامنة كل الأجهزة ✓`);
     }
   } catch(err){
     console.error('forcePushAllLocal failed', err);
-    showToast('حدث خطأ أثناء الرفع — حاول مرة أخرى');
+    alert('حدث خطأ أثناء الرفع:\n\n' + ((err && err.message) || String(err)));
   } finally {
     forcePushing = false;
     if(btn) btn.classList.remove('spinning');
