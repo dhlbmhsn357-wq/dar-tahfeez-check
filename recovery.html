@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>استرجاع ملخصات الشهور — دار الأرقم</title>
+<!--
+  صفحة استرجاع مؤقتة وآمنة (قراءة فقط).
+  - تقرأ فقط من IndexedDB المحلية (dar_alarqam_db) عبر transactions من نوع readonly.
+  - لا تكتب في IndexedDB إطلاقاً (لا idb.open بنسخة، لا put/add/delete، لا readwrite).
+  - لا تتصل بـ Supabase ولا بأي سيرفر، ولا تحوي أي مفتاح أو رمز.
+  - لا تقرأ app_users ولا roster ولا students ولا session_records.
+  - تقرأ month_summary (للاسترجاع) + months (id/الاسم/عدد الحصص للمطابقة فقط)
+    + بيانات وصفية عن عمليات month_summary المعلقة في sync_queue (بدون محتوى حساس).
+  - التصدير ينزّل ملفاً محلياً على الجهاز فقط؛ لا رفع تلقائي لأي جهة.
+  تُحذف هذه الصفحة بعد انتهاء الاسترجاع.
+-->
+<style>
+  :root{ --bg:#f6f3ec; --card:#fff; --ink:#2c2417; --muted:#6b6250; --gold:#b08d3f; --line:#e5ddcc; --ok:#1d7a4d; --warn:#9a6b00; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--bg); color:var(--ink); font-family:"IBM Plex Sans Arabic",system-ui,Segoe UI,Tahoma,sans-serif; line-height:1.7; padding:16px; }
+  .wrap{ max-width:640px; margin:0 auto; }
+  h1{ font-size:1.25rem; margin:8px 0 4px; }
+  .sub{ color:var(--muted); font-size:.9rem; margin-bottom:16px; }
+  .card{ background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:14px; }
+  .note{ background:#fbf7ec; border:1px solid #efe4c8; color:#6b5a2a; border-radius:10px; padding:10px 12px; font-size:.85rem; }
+  button{ width:100%; border:none; border-radius:12px; padding:14px 16px; font-size:1rem; font-weight:700; font-family:inherit; cursor:pointer; }
+  .primary{ background:var(--gold); color:#fff; }
+  .primary:disabled{ opacity:.5; cursor:not-allowed; }
+  .kv{ display:flex; justify-content:space-between; gap:10px; padding:7px 0; border-bottom:1px dashed var(--line); font-size:.95rem; }
+  .kv:last-child{ border-bottom:none; }
+  .kv b{ color:var(--gold); }
+  .months-list{ margin:6px 0 0; padding:0; list-style:none; font-size:.9rem; }
+  .months-list li{ padding:5px 0; border-bottom:1px dashed var(--line); }
+  .months-list code{ color:var(--muted); font-size:.78rem; }
+  .pill{ display:inline-block; padding:2px 10px; border-radius:999px; font-size:.78rem; font-weight:700; }
+  .pill.yes{ background:#fdeccd; color:var(--warn); }
+  .pill.no{ background:#e6f3ec; color:var(--ok); }
+  .err{ color:#9a1b1b; }
+  #exportBtn{ margin-top:6px; }
+  .tiny{ font-size:.78rem; color:var(--muted); margin-top:8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>استرجاع ملخصات الشهور</h1>
+  <div class="sub">أداة مؤقتة وآمنة — تقرأ بيانات هذا الجهاز فقط ولا تعدّل أي شيء.</div>
+
+  <div class="card">
+    <div class="note">
+      هذه الصفحة <b>تقرأ فقط</b> من ذاكرة التطبيق على جهازك. لا تكتب، لا تحذف،
+      ولا ترفع أي شيء لأي جهة. تنزّل ملفاً محلياً لتُرسله يدوياً.
+    </div>
+  </div>
+
+  <div class="card" id="previewCard">
+    <div id="status">جارٍ قراءة بيانات الجهاز…</div>
+    <div id="preview" hidden>
+      <div class="kv"><span>عدد ملخصات الشهور المحفوظة محلياً</span><b id="cSummary">0</b></div>
+      <div class="kv"><span>عدد الشهور المعروفة على الجهاز</span><b id="cMonths">0</b></div>
+      <div class="kv"><span>عمليات ملخص معلّقة لم تُرفع بعد</span><span id="cQueue"></span></div>
+      <div style="margin-top:10px; font-weight:700;">الشهور التي لها ملخص محلي:</div>
+      <ul class="months-list" id="monthsList"></ul>
+    </div>
+  </div>
+
+  <button id="exportBtn" class="primary" disabled>تصدير نسخة الاسترجاع</button>
+  <div class="tiny" id="exportMsg"></div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var DB_NAME = "dar_alarqam_db";
+  var snapshot = null; // ما سيُصدَّر
+
+  // فتح القاعدة بدون رقم إصدار → لا onupgradeneeded أبداً → لا تعديل للمخطط
+  function openReadOnly(){
+    return new Promise(function(resolve, reject){
+      var req = indexedDB.open(DB_NAME);
+      req.onsuccess = function(){ resolve(req.result); };
+      req.onerror = function(){ reject(req.error); };
+      req.onblocked = function(){ reject(new Error("blocked")); };
+      // ملاحظة: لا نعرّف onupgradeneeded، فلن يحدث أي ترقية/إنشاء يكتب في القرص
+    });
+  }
+  function getAll(db, store){
+    return new Promise(function(resolve, reject){
+      if(!db.objectStoreNames.contains(store)){ resolve([]); return; }
+      var req = db.transaction(store, "readonly").objectStore(store).getAll(); // readonly فقط
+      req.onsuccess = function(){ resolve(req.result || []); };
+      req.onerror = function(){ reject(req.error); };
+    });
+  }
+
+  function setStatus(html, isErr){
+    var el = document.getElementById("status");
+    el.innerHTML = html; el.className = isErr ? "err" : "";
+  }
+
+  function render(){
+    document.getElementById("preview").hidden = false;
+    document.getElementById("status").hidden = true;
+    document.getElementById("cSummary").textContent = snapshot.counts.month_summary;
+    document.getElementById("cMonths").textContent = snapshot.counts.months;
+    var q = snapshot.counts.queued_summary_ops;
+    document.getElementById("cQueue").innerHTML = q > 0
+      ? '<span class="pill yes">نعم — ' + q + '</span>'
+      : '<span class="pill no">لا</span>';
+
+    // نعرض فقط الشهور التي لها ملخص محلي (اسم + معرّف للمطابقة)
+    var withSummary = {};
+    snapshot.month_summary.forEach(function(s){ withSummary[s.month_id] = true; });
+    var nameById = {};
+    snapshot.months.forEach(function(m){ nameById[m.id] = m.name; });
+    var ul = document.getElementById("monthsList");
+    ul.innerHTML = "";
+    Object.keys(withSummary).forEach(function(mid){
+      var li = document.createElement("li");
+      var name = nameById[mid] || "(شهر غير مُسمّى على هذا الجهاز)";
+      li.textContent = name + " ";
+      var code = document.createElement("code");
+      code.textContent = mid;
+      li.appendChild(code);
+      ul.appendChild(li);
+    });
+    if(!ul.children.length){
+      ul.innerHTML = '<li>لا توجد ملخصات محلية على هذا الجهاز.</li>';
+    }
+
+    var btn = document.getElementById("exportBtn");
+    btn.disabled = snapshot.counts.month_summary === 0;
+  }
+
+  async function load(){
+    try{
+      var db = await openReadOnly();
+      var summaries = await getAll(db, "month_summary"); // كامل السجل للاسترجاع (لا بيانات طلاب هنا)
+      var monthsRaw = await getAll(db, "months");
+      // نأخذ من الشهر فقط ما يلزم للمطابقة: المعرّف والاسم وعدد الحصص
+      var months = monthsRaw.map(function(m){ return { id: m.id, name: m.name, sessions_count: m.sessions_count }; });
+      // من الطابور: بيانات وصفية فقط عن عمليات month_summary (لا محتوى حساس)
+      var queue = (await getAll(db, "sync_queue"))
+        .filter(function(o){ return o && o.table === "month_summary"; })
+        .map(function(o){ return { action:o.action, month_id:(o.payload&&o.payload.month_id)||null, createdAt:o.createdAt||null, failCount:o.failCount||0 }; });
+      if(db.close) db.close();
+
+      snapshot = {
+        exportedAt: new Date().toISOString(),
+        device: navigator.userAgent,
+        origin: location.origin,
+        counts: { month_summary: summaries.length, months: months.length, queued_summary_ops: queue.length },
+        months: months,
+        month_summary: summaries,
+        pending_summary_queue: queue
+      };
+      render();
+    }catch(e){
+      setStatus("تعذّر قراءة بيانات الجهاز: " + (e && e.message ? e.message : e) +
+        "<br>افتح هذه الصفحة على نفس الجهاز والمتصفح الذي يعمل عليه التطبيق.", true);
+    }
+  }
+
+  document.getElementById("exportBtn").addEventListener("click", function(){
+    if(!snapshot) return;
+    try{
+      var blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/json" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "dar-recovery-" + location.hostname + "-" + Date.now() + ".json";
+      document.body.appendChild(a); a.click();
+      setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 0);
+      document.getElementById("exportMsg").textContent = "تم تنزيل الملف على جهازك. أرسله يدوياً. لم يُعدَّل أي شيء.";
+    }catch(e){
+      document.getElementById("exportMsg").textContent = "تعذّر التصدير: " + (e && e.message ? e.message : e);
+    }
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>
