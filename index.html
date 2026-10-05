@@ -1103,25 +1103,13 @@ async function processSyncQueue(){
     try{
       let result;
       if(op.action === 'upsert'){
+        // upsert معتمد على قيود UNIQUE الموجودة فعلاً في القاعدة
+        // (session_records(student_id,session_number) و month_summary(month_id)).
+        // ملاحظة مهمة: لا نلجأ أبداً إلى حذف ثم إدخال عند فشل الـ upsert.
+        // الحذف+الإدخال كان يسبب فقدان بيانات: الحذف يُثبَّت ثم الإدخال يفشل
+        // (مثلاً لعمود مفقود)، فيضيع الصف. أي فشل هنا يبقى فشلاً واضحاً
+        // ويُعاد المحاولة لاحقاً بأمان عبر عدّاد الفشل في الطابور، دون أي حذف.
         result = await sb.from(op.table).upsert(op.payload, op.conflictKey ? { onConflict: op.conflictKey } : undefined).select();
-
-        // إذا فشل الـ upsert (غالباً بسبب عدم وجود UNIQUE constraint مطابق في قاعدة البيانات
-        // على الأعمدة المذكورة في onConflict)، نلجأ لبديل موثوق: حذف الصف المطابق ثم إدخاله.
-        // هذا يعطي نفس نتيجة upsert لكن دون الاعتماد على وجود constraint، فلا تبقى العملية عالقة.
-        if(result && result.error && op.conflictKey){
-          const cols = op.conflictKey.split(',').map(c => c.trim());
-          try{
-            let delQuery = sb.from(op.table).delete();
-            for(const col of cols){
-              if(op.payload[col] !== undefined) delQuery = delQuery.eq(col, op.payload[col]);
-            }
-            await delQuery;
-            const retry = await sb.from(op.table).insert(op.payload).select();
-            result = retry; // نتيجة المحاولة البديلة هي الفاصلة الآن
-          } catch(fallbackErr){
-            console.error('upsert fallback (delete+insert) failed', op, fallbackErr);
-          }
-        }
       } else if(op.action === 'insert'){
         result = await sb.from(op.table).insert(op.payload).select();
         // لو الإدخال فشل لأن الصف موجود بالفعل (تكرار مفتاح)، نعتبره نجاحاً منطقياً
