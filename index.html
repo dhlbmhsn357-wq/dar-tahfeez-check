@@ -781,7 +781,8 @@
     <div class="login-emblem">📖</div>
     <h1>دار الأرقم</h1>
     <p class="sub">متابعة حفظ القرآن الكريم</p>
-    <input type="text" id="loginUser" placeholder="اسم المستخدم" autocomplete="username">
+    <!-- Phase 3A (انتقالي): يقبل بريداً أو اسم مستخدم قديماً. يصبح بريداً فقط في مرحلة Auth-only. -->
+    <input type="text" id="loginUser" placeholder="البريد الإلكتروني أو اسم المستخدم" autocomplete="username" dir="auto">
     <input type="password" id="loginPass" placeholder="كلمة المرور" autocomplete="current-password">
     <button class="btn-primary" onclick="handleLogin()">دخول</button>
     <div class="error-msg" id="loginError"></div>
@@ -948,7 +949,18 @@
 const SUPABASE_URL = "https://adikmaqfwvhklesrmizx.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFkaWttYXFmd3Zoa2xlc3JtaXp4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2ODE0NzQsImV4cCI6MjA5ODI1NzQ3NH0.Pgu_2GLKXCeIshUW3cId2sUFqXf_49fpwl4RH0oOeDA";
 
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// Phase 3A: نفعّل جلسة Supabase Auth المحفوظة + التحديث التلقائي للرمز.
+// persistSession: تُحفظ الجلسة في localStorage فتبقى بعد إغلاق التطبيق وتعمل دون نت.
+// autoRefreshToken: يُجدَّد رمز الدخول تلقائياً عند توفر الإنترنت.
+// لا نخزّن كلمة المرور إطلاقاً — Supabase يدير الجلسة.
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: false,
+    storageKey: 'dar_alarqam_auth'
+  }
+});
 
 /* ============================================
    طبقة التخزين المحلي (IndexedDB)
@@ -1074,6 +1086,32 @@ window.addEventListener('offline', () => {
   isOnline = false;
   updateConnectionUI();
 });
+
+// Phase 3A: متابعة حالة جلسة Supabase Auth.
+// عند تجديد الرمز أو عودة الجلسة نستأنف المزامنة؛ وعند فقدان الجلسة فعلياً
+// (إلغاء/انتهاء من السيرفر) نعيد المستخدم لشاشة الدخول بدل تطبيق معطّل.
+// ملاحظة: لا يتدخّل في تسجيل الخروج اليدوي (يتولاه handleLogout).
+if(sb.auth && sb.auth.onAuthStateChange){
+  sb.auth.onAuthStateChange((event) => {
+    if(event === 'SIGNED_OUT'){
+      const appScreen = document.getElementById('appScreen');
+      const loggedFlag = localStorage.getItem('dar_alarqam_logged_in') === 'true';
+      // فقدان جلسة غير مقصود (العلم المحلي ما زال مرفوعاً) → تنظيف وعرض الدخول
+      if(loggedFlag && appScreen && appScreen.style.display !== 'none'){
+        localStorage.removeItem('dar_alarqam_logged_in');
+        localStorage.removeItem('dar_alarqam_session_at');
+        stopAutoSync();
+        appScreen.style.display = 'none';
+        const login = document.getElementById('loginScreen');
+        if(login) login.style.display = 'flex';
+      }
+    } else if((event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN') && isOnline){
+      if(localStorage.getItem('dar_alarqam_logged_in') === 'true'){
+        try{ backgroundSync(); }catch(e){}
+      }
+    }
+  });
+}
 
 /* ============================================
    معالجة قائمة المزامنة المعلقة
@@ -1371,6 +1409,9 @@ async function initApp(){
     // كل ما يلي متعلق بالشبكة فقط، ومحاط بحمايته الخاصة حتى لا يمنع فتح التطبيق أوفلاين
     if(hasSession && isOnline){
       try{
+        // نتأكد أن جلسة Supabase Auth مُحمَّلة (ومجدَّدة إن لزم) قبل أي نداء بيانات،
+        // حتى تحمل الطلبات رمز المستخدم الصحيح. لا تفشل لو كان المستخدم على النظام القديم.
+        try{ await sb.auth.getSession(); }catch(e){}
         // إصلاح لمرة واحدة: ترفع الأجهزة القديمة بياناتها المحلية الصحيحة للسحابة
         await runOneTimeRecoveryPush();
         await refreshFromCloud();
@@ -1687,62 +1728,100 @@ function setSession(){
   localStorage.setItem('dar_alarqam_session_at', String(Date.now()));
 }
 
+// تحقق بسيط ومحافظ من كون القيمة بريداً إلكترونياً (للتوجيه في الوضع المزدوج فقط)
+function isValidEmail(v){
+  return typeof v === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+}
+
+// خطوات ما بعد نجاح الدخول (مشتركة بين كل المسارات)
+async function startupAfterLogin(){
+  await runOneTimeRecoveryPush();
+  await refreshFromCloud();
+  showApp();
+  processSyncQueue();
+  startAutoSync();
+}
+
 async function handleLogin(){
-  const username = document.getElementById('loginUser').value.trim();
+  const identifier = document.getElementById('loginUser').value.trim();
   const password = document.getElementById('loginPass').value;
   const errEl = document.getElementById('loginError');
   errEl.textContent = '';
 
-  if(!username || !password){
-    errEl.textContent = 'من فضلك ادخل اسم المستخدم وكلمة المرور';
+  if(!identifier || !password){
+    errEl.textContent = 'من فضلك ادخل البريد الإلكتروني (أو اسم المستخدم) وكلمة المرور';
     return;
   }
 
+  // أثناء الوضع المزدوج: لا نرسل إلى Supabase Auth إلا قيمة تبدو بريداً صالحاً.
+  // اسم المستخدم القديم (غير البريد) يذهب لمسار app_users فقط.
+  const looksLikeEmail = isValidEmail(identifier);
+
   if(isOnline){
+    // (1) المسار الجديد: Supabase Auth بالبريد + كلمة المرور (فقط إذا كانت القيمة بريداً صالحاً).
+    //     النجاح يحفظ جلسة مُدارة من Supabase (دون تخزين كلمة المرور عندنا).
+    if(looksLikeEmail){
+      try{
+        const { data, error } = await sb.auth.signInWithPassword({ email: identifier, password });
+        if(!error && data && data.session){
+          setSession(); // علم محلي للدخول دون نت لاحقاً فقط — لا كلمة مرور
+          try{ await idbPut('meta', { key: 'auth_email', value: { email: identifier } }); }catch(e){}
+          await startupAfterLogin();
+          return;
+        }
+      } catch(e){ console.error('auth signIn failed', e); }
+    }
+
+    // (2) fallback مؤقت أثناء الانتقال فقط: النظام القديم app_users (اسم مستخدم + كلمة مرور).
+    //     يُزال في مرحلة لاحقة (Auth-only) بعد تأكيد الدخول الجديد.
     try{
       const { data, error } = await sb
         .from('app_users')
         .select('*')
-        .eq('username', username)
+        .eq('username', identifier)
         .eq('password', password)
         .maybeSingle();
-
       if(!error && data){
-        await idbPut('meta', { key: 'cached_user', value: { username, password } });
+        await idbPut('meta', { key: 'cached_user', value: { username: identifier, password } });
         setSession();
-        await runOneTimeRecoveryPush();
-        await refreshFromCloud();
-        showApp();
-        processSyncQueue();
-        startAutoSync();
-        return;
-      }
-      if(!error && !data){
-        errEl.textContent = 'اسم المستخدم أو كلمة المرور غير صحيحة';
+        await startupAfterLogin();
         return;
       }
     } catch(e){ console.error(e); }
-  }
 
-  const cached = await idbGet('meta', 'cached_user');
-  if(cached && cached.value.username === username && cached.value.password === password){
-    setSession();
-    showApp();
-    if(isOnline) startAutoSync();
+    errEl.textContent = 'بيانات الدخول غير صحيحة';
     return;
   }
 
-  errEl.textContent = isOnline
-    ? 'اسم المستخدم أو كلمة المرور غير صحيحة'
-    : 'لا يمكن تسجيل الدخول لأول مرة بدون إنترنت. تأكد من الاتصال أول مرة فقط';
+  // دون إنترنت: نقبل الدخول فقط إذا كانت هناك جلسة سابقة ناجحة على هذا الجهاز.
+  // (أ) جلسة Supabase Auth محفوظة؟
+  try{
+    const { data } = await sb.auth.getSession();
+    if(data && data.session){
+      setSession();
+      showApp();
+      return;
+    }
+  }catch(e){}
+  // (ب) أو بيانات النظام القديم المخزَّنة (أثناء الانتقال)
+  const cached = await idbGet('meta', 'cached_user');
+  if(cached && cached.value.username === identifier && cached.value.password === password){
+    setSession();
+    showApp();
+    return;
+  }
+
+  errEl.textContent = 'لا يمكن تسجيل الدخول لأول مرة بدون إنترنت. تأكد من الاتصال أول مرة فقط';
 }
 
-function handleLogout(){
+async function handleLogout(){
   stopAutoSync();
   if(realtimeChannel){
     try{ sb.removeChannel(realtimeChannel); } catch(e){}
     realtimeChannel = null;
   }
+  // إنهاء جلسة Supabase Auth أيضاً (لا يفشل لو كنا على النظام القديم أو دون نت)
+  try{ await sb.auth.signOut(); }catch(e){}
   localStorage.removeItem('dar_alarqam_logged_in');
   localStorage.removeItem('dar_alarqam_session_at');
   document.getElementById('appScreen').style.display = 'none';
