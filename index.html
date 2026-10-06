@@ -813,6 +813,7 @@
         <button class="refresh-btn" id="refreshBtn" onclick="manualRefresh()" title="تحديث البيانات من السحابة">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
         </button>
+        <button class="logout-btn" id="membersBtn" onclick="openMembers()" style="display:none;">إدارة الأعضاء</button>
         <button class="logout-btn" onclick="handleLogout()">تسجيل خروج</button>
       </div>
     </div>
@@ -942,6 +943,32 @@
 <div class="modal-overlay" id="modalTodoSheet">
   <div class="modal-box" id="todoSheetBody"></div>
 </div>
+
+<!-- ============ MODAL: Member management (owner/admin only) ============ -->
+<div class="modal-overlay" id="modalMembers">
+  <div class="modal-box">
+    <h3>إدارة الأعضاء</h3>
+    <div style="font-size:.82rem; color:var(--muted,#6b6250); margin:-4px 0 12px;">
+      لإضافة عضو: أنشئ مستخدماً من لوحة Supabase، ثم فعّله وحدّد دوره من هنا.
+    </div>
+    <div id="membersList" style="max-height:60vh; overflow:auto;"></div>
+    <div class="modal-actions" style="margin-top:12px;">
+      <button class="btn-secondary" style="flex:1;" onclick="closeModal('modalMembers')">إغلاق</button>
+    </div>
+  </div>
+</div>
+<style>
+  .member-row{ border:1px solid var(--line,#e5ddcc); border-radius:12px; padding:10px 12px; margin-bottom:10px; }
+  .member-row .m-name{ font-weight:700; }
+  .member-row .m-email{ font-size:.8rem; color:var(--muted,#6b6250); direction:ltr; text-align:right; }
+  .member-row .m-ctrls{ display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
+  .member-row select{ font-family:inherit; padding:6px 8px; border-radius:8px; border:1px solid var(--line,#e5ddcc); }
+  .m-badge{ font-size:.72rem; padding:2px 10px; border-radius:999px; font-weight:700; }
+  .m-badge.on{ background:#e6f3ec; color:#1d7a4d; } .m-badge.off{ background:#fdeccd; color:#9a6b00; }
+  .m-badge.owner{ background:#efe7d3; color:#8a6d27; }
+  .m-toggle{ border:none; border-radius:8px; padding:6px 12px; font-family:inherit; font-weight:700; cursor:pointer; }
+  .m-toggle.deact{ background:#fdeccd; color:#9a6b00; } .m-toggle.act{ background:#e6f3ec; color:#1d7a4d; }
+</style>
 
 <div id="installBanner">
   <div class="txt"><b>ثبّت التطبيق على شاشتك الرئيسية</b>للوصول السريع وكأنه تطبيق حقيقي</div>
@@ -1422,6 +1449,7 @@ async function initApp(){
         showMembershipStatus(t && t.active === false ? 'inactive' : 'verify_failed');
         return;
       }
+      await setCurrentIdentity(t.role);
     }
 
     // أونلاين: نتحقق من العضوية قبل تحميل أي بيانات
@@ -1432,6 +1460,7 @@ async function initApp(){
         const m = await fetchMembership();
         if(m.state === 'active'){
           await cacheMembership(m);
+          await setCurrentIdentity(m.role);
         } else {
           if(m.user_id && (m.state === 'inactive' || m.state === 'none')){
             await cacheMembership({ user_id: m.user_id, active: false, role: m.role });
@@ -1829,10 +1858,20 @@ function showMembershipStatus(state){
   if(scr) scr.style.display = 'flex';
 }
 
+// ===== هوية المستخدم الحالي (لإظهار أدوات الإدارة) =====
+let currentUserRole = null, currentUserId = null;
+async function setCurrentIdentity(role){
+  currentUserRole = role || null;
+  try{ const { data } = await sb.auth.getSession(); currentUserId = (data && data.session && data.session.user) ? data.session.user.id : null; }
+  catch(e){ currentUserId = null; }
+  const b = document.getElementById('membersBtn');
+  if(b) b.style.display = (currentUserRole === 'owner' || currentUserRole === 'admin') ? '' : 'none';
+}
+
 // بعد دخول ناجح (أونلاين): يتحقق من العضوية ويقرّر الوجهة. fail-closed على verify_failed.
 async function proceedByMembership(){
   const m = await fetchMembership();
-  if(m.state === 'active'){ await cacheMembership(m); await startupAfterLogin(); return; }
+  if(m.state === 'active'){ await cacheMembership(m); await setCurrentIdentity(m.role); await startupAfterLogin(); return; }
   if(m.state === 'inactive' || m.state === 'none'){
     if(m.user_id) await cacheMembership({ user_id: m.user_id, active: false, role: m.role });
     showMembershipStatus(m.state);
@@ -1876,7 +1915,7 @@ async function handleLogin(){
     if(uid){
       setSession();
       const t = await readTrustedMembership(); // يخص UID الحالي فقط
-      if(t && t.active === true){ showApp(); return; }
+      if(t && t.active === true){ await setCurrentIdentity(t.role); showApp(); return; }
       if(t && t.active === false){ showMembershipStatus('inactive'); return; }
       // لا cache لهذا الحساب (أو لحساب آخر) → ممنوع حتى التحقق أونلاين
       showMembershipStatus('verify_failed');
@@ -1904,6 +1943,80 @@ async function handleLogout(){
   document.getElementById('loginScreen').style.display = 'flex';
   document.getElementById('loginUser').value = '';
   document.getElementById('loginPass').value = '';
+  currentUserRole = null; currentUserId = null;
+  const mb = document.getElementById('membersBtn'); if(mb) mb.style.display = 'none';
+}
+
+// ===== إدارة الأعضاء (owner/admin) — عبر RPC آمنة فقط، لا كتابة مباشرة على profiles =====
+const ROLE_LABEL = { owner:'مالك', admin:'أدمن', sheikh:'شيخ', assistant:'مساعد' };
+function memberErrorToArabic(msg){
+  msg = msg || '';
+  if(/your own membership/i.test(msg)) return 'لا يمكنك تعديل حسابك';
+  if(/modify an owner/i.test(msg)) return 'لا يمكن تعديل المالك';
+  if(/another admin/i.test(msg)) return 'لا يمكن للأدمن تعديل أدمن آخر';
+  if(/assign the admin role/i.test(msg)) return 'لا يمكن للأدمن إسناد دور أدمن';
+  if(/not authorized/i.test(msg)) return 'غير مصرّح لك بهذا';
+  if(/invalid role/i.test(msg)) return 'دور غير صالح';
+  if(/member not found/i.test(msg)) return 'العضو غير موجود';
+  return 'تعذّر تنفيذ العملية';
+}
+
+async function openMembers(){
+  openModal('modalMembers');
+  const list = document.getElementById('membersList');
+  list.innerHTML = '<div style="text-align:center; padding:20px; color:#6b6250;">جارٍ التحميل…</div>';
+  if(!isOnline){ list.innerHTML = '<div style="text-align:center; padding:20px; color:#9a1b1b;">إدارة الأعضاء تحتاج اتصالاً بالإنترنت.</div>'; return; }
+  const { data, error } = await sb.rpc('admin_list_members');
+  if(error){ list.innerHTML = `<div style="text-align:center; padding:20px; color:#9a1b1b;">${escapeHtml(memberErrorToArabic(error.message))}</div>`; return; }
+  renderMembers(data || []);
+}
+
+function renderMembers(rows){
+  const list = document.getElementById('membersList');
+  const viewerIsOwner = currentUserRole === 'owner';
+  let html = '';
+  rows.forEach(m => {
+    const isSelf = m.id === currentUserId;
+    const isOwnerRow = m.role === 'owner';
+    // من يمكن إدارته: ليس النفس، ليس owner، وإن كان الناظر admin فلا يُدير admin
+    const canManage = !isSelf && !isOwnerRow && (viewerIsOwner || (currentUserRole === 'admin' && m.role !== 'admin'));
+    const roleOpts = viewerIsOwner ? ['admin','sheikh','assistant'] : ['sheikh','assistant'];
+    const nid = escapeJsString(m.id);
+
+    let ctrls;
+    if(isOwnerRow){ ctrls = '<span class="m-badge owner">المالك</span>'; }
+    else if(!canManage){
+      ctrls = `<span class="m-badge ${m.active?'on':'off'}">${m.active?'مُفعَّل':'موقوف'}</span>` + (isSelf ? ' <span style="font-size:.72rem;color:#6b6250;">(أنت)</span>' : '');
+    } else {
+      const sel = `<select onchange="changeMemberRole('${nid}', this.value)">` +
+        roleOpts.map(r => `<option value="${r}" ${m.role===r?'selected':''}>${ROLE_LABEL[r]}</option>`).join('') + `</select>`;
+      const tgl = m.active
+        ? `<button class="m-toggle deact" onclick="toggleMemberActive('${nid}', false)">تعطيل</button>`
+        : `<button class="m-toggle act" onclick="toggleMemberActive('${nid}', true)">تفعيل</button>`;
+      const badge = `<span class="m-badge ${m.active?'on':'off'}">${m.active?'مُفعَّل':'موقوف'}</span>`;
+      ctrls = badge + sel + tgl;
+    }
+
+    html += `<div class="member-row">
+      <div class="m-name">${escapeHtml(m.full_name || '—')} <span class="m-badge" style="background:#eee;color:#555;">${ROLE_LABEL[m.role]||escapeHtml(m.role)}</span></div>
+      <div class="m-email">${escapeHtml(m.email || '')}</div>
+      <div class="m-ctrls">${ctrls}</div>
+    </div>`;
+  });
+  list.innerHTML = html || '<div style="text-align:center; padding:20px; color:#6b6250;">لا يوجد أعضاء.</div>';
+}
+
+async function changeMemberRole(id, newRole){
+  const { error } = await sb.rpc('admin_update_member', { p_target: id, p_role: newRole });
+  if(error){ showToast(memberErrorToArabic(error.message)); }
+  else { showToast('تم تحديث الدور ✓'); }
+  openMembers();
+}
+async function toggleMemberActive(id, makeActive){
+  const { error } = await sb.rpc('admin_update_member', { p_target: id, p_active: makeActive });
+  if(error){ showToast(memberErrorToArabic(error.message)); }
+  else { showToast(makeActive ? 'تم التفعيل ✓' : 'تم التعطيل ✓'); }
+  openMembers();
 }
 
 function showApp(){
