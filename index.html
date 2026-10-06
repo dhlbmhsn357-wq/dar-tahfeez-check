@@ -825,13 +825,8 @@
     <div id="monthsView">
       <div class="section-title">الشهور</div>
       <div class="months-grid" id="monthsGrid"></div>
-      <div class="sync-tools">
-        <button class="sync-tools-btn" onclick="forcePushAllLocal()" title="ارفع كل بيانات هذا الجهاز إلى السحابة">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
-          مزامنة بيانات هذا الجهاز للسحابة
-        </button>
-        <div class="sync-tools-hint">استخدمه مرة واحدة لو كانت بيانات هذا الجهاز لا تظهر على الأجهزة الأخرى</div>
-      </div>
+      <!-- Phase 4.1: زر الرفع الكامل أُزيل من الواجهة. forcePushAllLocal باقية كأداة استرجاع
+           يدوية فقط (من console)، وتسحب tombstones أولاً ثم ترفع الأحياء غير الميتة فقط. -->
     </div>
 
     <!-- ----- Inside a month: tabs (students / summary) ----- -->
@@ -1111,12 +1106,11 @@ function updateConnectionUI(){
 window.addEventListener('online', () => {
   isOnline = true;
   updateConnectionUI();
-  processSyncQueue();
-  // لو كان المستخدم مسجّل دخول بالفعل، نتأكد أن التزامن التلقائي يعمل
+  // دورة واحدة عبر single-flight (pull→prune→sweep→push→refresh)
   if(localStorage.getItem('dar_alarqam_logged_in') === 'true'){
     startAutoSync();
-    backgroundSync();
   }
+  requestSync('online');
 });
 window.addEventListener('offline', () => {
   isOnline = false;
@@ -1143,7 +1137,7 @@ if(sb.auth && sb.auth.onAuthStateChange){
       }
     } else if((event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN') && isOnline){
       if(localStorage.getItem('dar_alarqam_logged_in') === 'true'){
-        try{ backgroundSync(); }catch(e){}
+        try{ requestSync('auth'); }catch(e){}
       }
     }
   });
@@ -1152,21 +1146,14 @@ if(sb.auth && sb.auth.onAuthStateChange){
 /* ============================================
    معالجة قائمة المزامنة المعلقة
    ============================================ */
+// PUSH-only: يرفع طابور العمليات فقط. لا يسحب ولا يستدعي refreshFromCloud/syncCycle.
+// التسلسل (pull→prune→sweep→push→refresh) تضمنه syncCycle، والتزامن تضمنه requestSync.
+// ملاحظة: delete/delete_by لم تعد تُنتَج؛ أي بقايا منها تُعقَّم قبل الوصول هنا، وتُتجاهل احتياطاً.
 async function processSyncQueue(){
   if(!isOnline) return false;
 
-  // لو فيه مزامنة شغالة فعلاً، ننتظرها بدل ما نرجع فوراً ونضيع نتيجة العملية الحالية
-  if(isSyncing){
-    while(isSyncing){
-      await new Promise(r => setTimeout(r, 150));
-    }
-  }
-
   const queue = await idbGetAll('sync_queue');
   if(queue.length === 0) return true;
-
-  isSyncing = true;
-  updateConnectionUI();
 
   let allSucceeded = true;
 
@@ -1175,14 +1162,18 @@ async function processSyncQueue(){
 
   for(const op of queue){
     try{
+      // حزام أمان: الحذف الصلب أُلغي في Phase 4.1 (الخادم يرفضه). أي op قديمة من هذا النوع
+      // تُزال بلا إرسال (التعقيم في syncCycle يسبقها عادةً).
+      if(op.action === 'delete' || op.action === 'delete_by'){
+        await idbDelete('sync_queue', op.localId);
+        continue;
+      }
+
       let result;
       if(op.action === 'upsert'){
         // upsert معتمد على قيود UNIQUE الموجودة فعلاً في القاعدة
         // (session_records(student_id,session_number) و month_summary(month_id)).
         // ملاحظة مهمة: لا نلجأ أبداً إلى حذف ثم إدخال عند فشل الـ upsert.
-        // الحذف+الإدخال كان يسبب فقدان بيانات: الحذف يُثبَّت ثم الإدخال يفشل
-        // (مثلاً لعمود مفقود)، فيضيع الصف. أي فشل هنا يبقى فشلاً واضحاً
-        // ويُعاد المحاولة لاحقاً بأمان عبر عدّاد الفشل في الطابور، دون أي حذف.
         result = await sb.from(op.table).upsert(op.payload, op.conflictKey ? { onConflict: op.conflictKey } : undefined).select();
       } else if(op.action === 'insert'){
         result = await sb.from(op.table).insert(op.payload).select();
@@ -1192,10 +1183,6 @@ async function processSyncQueue(){
         }
       } else if(op.action === 'update'){
         result = await sb.from(op.table).update(op.payload.values).eq('id', op.payload.id).select();
-      } else if(op.action === 'delete'){
-        result = await sb.from(op.table).delete().eq('id', op.payload.id);
-      } else if(op.action === 'delete_by'){
-        result = await sb.from(op.table).delete().eq(op.payload.column, op.payload.value);
       }
 
       if(result && result.error){
@@ -1235,20 +1222,9 @@ async function processSyncQueue(){
         code: 'EXCEPTION', at: new Date().toISOString()
       };
       // مشكلة في الشبكة وقت المزامنة - نوقف ونحاول تاني لما النت يرجع فعلياً
-      isSyncing = false;
-      updateConnectionUI();
       return false;
     }
   }
-
-  isSyncing = false;
-  updateConnectionUI();
-
-  // نسحب أحدث البيانات من السحابة دائماً — حتى لو فشلت بعض العمليات الصادرة.
-  // القراءة (السحب) مستقلة تماماً عن الكتابة (الرفع)، وكان ربطهما معاً يعني أن
-  // عملية واحدة عالقة في الطابور تمنع الجهاز من رؤية أي تحديثات من الأجهزة الأخرى.
-  await refreshFromCloud();
-  if(typeof refreshCurrentView === 'function') await refreshCurrentView();
 
   return allSucceeded;
 }
@@ -1313,17 +1289,151 @@ async function refreshFromCloud(){
       return { ok: false, error: firstError.error };
     }
 
-    if(rosterRes.data) for(const r of rosterRes.data) if(!skipIfPending('roster', r)) await idbPut('roster', r);
-    if(monthsRes.data) for(const m of monthsRes.data) if(!skipIfPending('months', m)) await idbPut('months', m);
-    if(studentsRes.data) for(const s of studentsRes.data) if(!skipIfPending('students', s)) await idbPut('students', s);
-    if(recordsRes.data) for(const r of recordsRes.data) if(!skipIfPending('session_records', r)) await idbPut('session_records', r);
-    if(summaryRes.data) for(const sm of summaryRes.data) if(!skipIfPending('month_summary', sm)) await idbPut('month_summary', sm);
+    // derivation: نبني مجموعات الموتى من المسحوب (+ المحلي احتياطاً) لتطبيق tombstones.
+    // delete-wins: الصف الميت يُحذف محلياً دائماً (يتجاوز pending)؛ الحي يُكتب ما لم يكن معلقاً.
+    const dead = await buildDeadSets(monthsRes.data || [], rosterRes.data || [], studentsRes.data || []);
+    const putIfLive = async (store, row) => { if(!skipIfPending(store, row)) await idbPut(store, row); };
+
+    if(monthsRes.data) for(const m of monthsRes.data){
+      if(m.deleted_at || dead.deadMonthIds.has(m.id)) await idbDelete('months', m.id); else await putIfLive('months', m);
+    }
+    if(rosterRes.data) for(const r of rosterRes.data){
+      if(r.deleted_at || dead.deadRosterIds.has(r.id)) await idbDelete('roster', r.id); else await putIfLive('roster', r);
+    }
+    if(studentsRes.data) for(const s of studentsRes.data){
+      if(dead.deadStudentIds.has(s.id)) await idbDelete('students', s.id); else await putIfLive('students', s);
+    }
+    if(recordsRes.data) for(const r of recordsRes.data){
+      if(dead.deadStudentIds.has(r.student_id)) await idbDelete('session_records', r.id); else await putIfLive('session_records', r);
+    }
+    if(summaryRes.data) for(const sm of summaryRes.data){
+      if(dead.deadMonthIds.has(sm.month_id)) await idbDelete('month_summary', sm.id); else await putIfLive('month_summary', sm);
+    }
 
     return { ok: true };
   } catch(err){
     console.error('Error refreshing from cloud', err);
     return { ok: false, error: err };
   }
+}
+
+/* ============================================
+   Phase 4.1 — soft delete: دورة مزامنة واحدة منظمة + حذف مشتقّ
+   الترتيب الوحيد: pull tombstones → prune queue → local sweep → push → full refresh.
+   ============================================ */
+
+// يبني مجموعات المعرّفات الميتة من صفوف السحابة + صفوف IndexedDB المحلية معاً،
+// حتى يُحسَم طفل معلّق لم يُزامَن أبوه بعد. الطفلان (session_records/month_summary) مشتقّان.
+async function buildDeadSets(cloudMonths, cloudRoster, cloudStudents){
+  let lm = [], lr = [], ls = [];
+  try{ lm = await idbGetAll('months'); lr = await idbGetAll('roster'); ls = await idbGetAll('students'); }catch(e){}
+  const deadMonthIds = new Set(), deadRosterIds = new Set(), deadStudentIds = new Set();
+  for(const m of cloudMonths.concat(lm)) if(m && m.deleted_at) deadMonthIds.add(m.id);
+  for(const r of cloudRoster.concat(lr)) if(r && r.deleted_at) deadRosterIds.add(r.id);
+  for(const s of cloudStudents.concat(ls)){
+    if(!s) continue;
+    if(s.deleted_at || deadMonthIds.has(s.month_id) || deadRosterIds.has(s.roster_id)) deadStudentIds.add(s.id);
+  }
+  return { deadMonthIds, deadRosterIds, deadStudentIds };
+}
+
+// سجلّ تشخيصي خفيف لكل عملية أُلغيت بسبب حذف بعيد (يتحوّل لـ dead-letter كامل في 4.4).
+async function logCancellation(op, reason){
+  try{
+    const rec = await idbGet('meta', 'tombstone_cancellations');
+    const arr = (rec && rec.value) || [];
+    const p = op.payload || {};
+    arr.push({ localId: op.localId, table: op.table, action: op.action,
+      recordId: p.id || p.student_id || p.month_id || (p.values && p.values.id) || null,
+      reason, at: new Date().toISOString() });
+    while(arr.length > 200) arr.shift();
+    await idbPut('meta', { key: 'tombstone_cancellations', value: arr });
+  }catch(e){ console.error('logCancellation failed', e); }
+}
+
+// يفحص العمليات نفسها (لا cloud rows): يلغي أي op على كيان ميت أو تابع لميت،
+// حتى لو لم يوجد للصف المستهدف cloud row بعد. ويعقّم كل delete/delete_by القديمة.
+async function pruneQueueByDeadSets(dead){
+  const q = await idbGetAll('sync_queue');
+  for(const op of q){
+    let kill = false;
+    if(op.action === 'delete' || op.action === 'delete_by'){
+      kill = true; // الحذف الصلب أُلغي كلياً في 4.1
+    } else {
+      const p = op.payload || {};
+      if(op.table === 'months')               kill = dead.deadMonthIds.has(p.id);
+      else if(op.table === 'roster')          kill = dead.deadRosterIds.has(p.id);
+      else if(op.table === 'students')        kill = dead.deadStudentIds.has(p.id) || dead.deadMonthIds.has(p.month_id) || dead.deadRosterIds.has(p.roster_id);
+      else if(op.table === 'session_records') kill = dead.deadStudentIds.has(p.student_id);
+      else if(op.table === 'month_summary')   kill = dead.deadMonthIds.has(p.month_id);
+    }
+    if(kill){ await logCancellation(op, 'remote_tombstone_prune'); await idbDelete('sync_queue', op.localId); }
+  }
+}
+
+// يمسح من IndexedDB كل صف مشتقّ ميت، حتى بلا cloud row مقابل.
+async function localSweep(dead){
+  const sweep = async (store, pred) => {
+    let rows = []; try{ rows = await idbGetAll(store); }catch(e){ return; }
+    for(const r of rows) if(r && pred(r)) await idbDelete(store, r.id);
+  };
+  await sweep('months',          r => r.deleted_at || dead.deadMonthIds.has(r.id));
+  await sweep('roster',          r => r.deleted_at || dead.deadRosterIds.has(r.id));
+  await sweep('students',        r => dead.deadStudentIds.has(r.id));
+  await sweep('session_records', r => dead.deadStudentIds.has(r.student_id));
+  await sweep('month_summary',   r => dead.deadMonthIds.has(r.month_id));
+}
+
+// الدورة الكاملة. لا تُستدعى مباشرة من أكثر من مكان بالتوازي — دائماً عبر requestSync.
+async function syncCycle(){
+  if(!isOnline) return { ok: false };
+  isSyncing = true; updateConnectionUI();
+  try{
+    // (A) PULL للكيانات فقط (read-only) لبناء dead sets قبل أي رفع
+    const [mRes, rRes, sRes] = await Promise.all([
+      fetchAllRows('months'), fetchAllRows('roster'), fetchAllRows('students')
+    ]);
+    const perr = [mRes, rRes, sRes].find(x => x.error);
+    if(perr){
+      // تعذّر السحب: لا نرفع queue قديمة دون معرفة الحذف البعيد. نبقي المحلي ونعيد لاحقاً.
+      console.error('syncCycle pull failed', perr.error);
+      return { ok: false, error: perr.error };
+    }
+    const dead = await buildDeadSets(mRes.data || [], rRes.data || [], sRes.data || []);
+
+    // (B) prune queue + local sweep قبل أي push
+    await pruneQueueByDeadSets(dead);
+    await localSweep(dead);
+
+    // (C) push فقط
+    await processSyncQueue();
+
+    // (D) refresh كامل (derivation + skipIfPending) ثم إعادة الرسم
+    const result = await refreshFromCloud();
+    if(typeof refreshCurrentView === 'function') await refreshCurrentView();
+    return result || { ok: true };
+  } catch(err){
+    console.error('syncCycle failed', err);
+    return { ok: false, error: err };
+  } finally {
+    isSyncing = false; updateConnectionUI();
+  }
+}
+
+// single-flight: يمنع تشغيل syncCycle مرتين بالتوازي. أي إشارة أثناء دورة جارية
+// تطلب rerun واحد بعد انتهائها (startup/online/realtime/manual/write/poll/visibility).
+let _syncRunning = false, _syncRerun = false, _syncPromise = null;
+function requestSync(/* reason */){
+  if(_syncRunning){ _syncRerun = true; return _syncPromise; }
+  _syncRunning = true;
+  _syncPromise = (async () => {
+    let res = { ok: false };
+    try{
+      do { _syncRerun = false; res = await syncCycle(); } while(_syncRerun);
+    } finally { _syncRunning = false; }
+    return res;
+  })();
+  return _syncPromise;
 }
 
 /* ============================================
@@ -1356,10 +1466,11 @@ async function writeLocal(table, record, action='upsert', conflictKey=null){
 
   if(isOnline){
     try{
-      const synced = await processSyncQueue();
-      return { savedLocally: true, syncedNow: !!synced };
+      // دورة كاملة عبر single-flight: pull→prune→sweep→push→refresh (لا push معزول).
+      const res = await requestSync('write');
+      return { savedLocally: true, syncedNow: !!(res && res.ok) };
     } catch(err){
-      console.error('processSyncQueue failed after writeLocal', err);
+      console.error('requestSync failed after writeLocal', err);
       // البيانات محفوظة محلياً بالفعل (idbPut نجحت فوق)؛ فقط المزامنة السحابية فشلت،
       // وستُعاد المحاولة تلقائياً لاحقاً عبر الطابور
       return { savedLocally: true, syncedNow: false };
@@ -1368,33 +1479,18 @@ async function writeLocal(table, record, action='upsert', conflictKey=null){
   return { savedLocally: true, syncedNow: false };
 }
 
-async function deleteLocal(table, id){
+// Phase 4.1: الحذف الرسمي الوحيد = soft delete على كيان حامل للتومبستون (months/students/roster).
+// يضع deleted_at عبر عملية update، ويحذف الصف محلياً فوراً لتحديث الواجهة، ثم يطلب دورة مزامنة.
+// الطفلان (session_records/month_summary) لا يُرسَل لهما شيء — حالتهما مشتقّة من الأب.
+async function enqueueSoftDelete(table, id){
   try{
     await idbDelete(table, id);
-    await idbAddToQueue({ table, action: 'delete', payload: { id } });
+    await idbAddToQueue({ table, action: 'update', payload: { id, values: { deleted_at: new Date().toISOString() } } });
   } catch(err){
-    console.error('deleteLocal failed', table, id, err);
+    console.error('enqueueSoftDelete failed', table, id, err);
     return { savedLocally: false };
   }
-  if(isOnline) processSyncQueue();
-  return { savedLocally: true };
-}
-
-async function deleteLocalBy(table, column, value, localPredicate){
-  try{
-    // حذف كل العناصر المطابقة محلياً
-    const all = await idbGetAll(table);
-    for(const item of all){
-      if(localPredicate(item)){
-        await idbDelete(table, item.id);
-      }
-    }
-    await idbAddToQueue({ table, action: 'delete_by', payload: { column, value } });
-  } catch(err){
-    console.error('deleteLocalBy failed', table, column, value, err);
-    return { savedLocally: false };
-  }
-  if(isOnline) processSyncQueue();
+  if(isOnline) requestSync('soft-delete');
   return { savedLocally: true };
 }
 
@@ -1443,6 +1539,18 @@ async function initApp(){
     if(legacyCred){ await idbDelete('meta', 'cached_user'); }
   }catch(e){ /* فشل التنظيف لا يجب أن يمنع الإقلاع */ }
 
+  // Phase 4.1 (idempotent): تعقيم أي عمليات حذف صلب قديمة من الطابور.
+  // الحذف الصلب أُلغي (الخادم يرفضه)؛ تركها يسبب فشلاً متكرراً. الحذف الآن soft عبر update.
+  try{
+    const q = await idbGetAll('sync_queue');
+    for(const op of q){
+      if(op && (op.action === 'delete' || op.action === 'delete_by')){
+        await logCancellation(op, 'legacy_hard_delete_sanitized');
+        await idbDelete('sync_queue', op.localId);
+      }
+    }
+  }catch(e){ /* لا يمنع الإقلاع */ }
+
   try{
     updateConnectionUI();
 
@@ -1478,9 +1586,7 @@ async function initApp(){
         }
         // إصلاح لمرة واحدة: ترفع الأجهزة القديمة بياناتها المحلية الصحيحة للسحابة
         await runOneTimeRecoveryPush();
-        await refreshFromCloud();
-        await refreshCurrentView();
-        processSyncQueue();
+        await requestSync('startup');
         startAutoSync();
       } catch(netErr){
         // فشل الشبكة عند الفتح لا يجب أن يمنع استخدام التطبيق — البيانات المحلية كافية
@@ -1579,10 +1685,8 @@ async function manualRefresh(){
   if(btn) btn.classList.add('spinning');
 
   try{
-    // نرفع أي تعديلات معلقة أولاً، ثم نسحب أحدث نسخة كاملة
-    await processSyncQueue();
-    const result = await refreshFromCloud();
-    await refreshCurrentView();
+    // دورة كاملة عبر single-flight: pull tombstones → prune → sweep → push → refresh
+    const result = await requestSync('manual');
 
     if(result && result.ok === false){
       showToast('تعذّر التحديث بالكامل — تحقق من الاتصال وحاول مجدداً');
@@ -1599,10 +1703,9 @@ async function manualRefresh(){
 }
 
 /* ============================================
-   إعادة رفع كامل للبيانات المحلية إلى السحابة (Force Push)
-   يُستخدم لإصلاح الأجهزة التي تحتوي على بيانات صحيحة محلياً لكنها
-   لم تُرفع للسحابة (بسبب عمليات فشلت سابقاً قبل إضافة القيود).
-   يتخطى طابور المزامنة تماماً ويرفع كل شيء مباشرة عبر upsert.
+   أداة استرجاع يدوية فقط (Phase 4.1): لا زر في الواجهة.
+   تُستدعى من console عند الحاجة. تسحب tombstones أولاً (دورة كاملة)،
+   ثم ترفع الأحياء غير الميتة فقط — فلا تُعيد إحياء أي محذوف بعيد.
    ============================================ */
 let forcePushing = false;
 async function forcePushAllLocal(){
@@ -1612,13 +1715,13 @@ async function forcePushAllLocal(){
     return;
   }
 
-  const ok = confirm('سيتم رفع كل البيانات الموجودة على هذا الجهاز إلى السحابة ودمجها مع باقي الأجهزة. هل تريد المتابعة؟');
+  const ok = confirm('أداة استرجاع: ستسحب أولاً حالة الحذف من السحابة ثم ترفع الأحياء فقط من هذا الجهاز. متابعة؟');
   if(!ok) return;
 
   forcePushing = true;
   const btn = document.getElementById('refreshBtn');
   if(btn) btn.classList.add('spinning');
-  showToast('جارٍ رفع كل البيانات المحلية...');
+  showToast('جارٍ الاسترجاع الآمن...');
 
   // خريطة الجداول ومفاتيح التعارض (نفس ما يستخدمه التطبيق)
   const tables = [
@@ -1633,8 +1736,25 @@ async function forcePushAllLocal(){
   let firstError = null;
 
   try{
+    // (1) اسحب tombstones ونظّف المحلي قبل أي رفع، حتى لا نُعيد إحياء محذوف
+    await requestSync('recovery-pull');
+    const [mRes, rRes, sRes] = await Promise.all([
+      fetchAllRows('months'), fetchAllRows('roster'), fetchAllRows('students')
+    ]);
+    const dead = await buildDeadSets(mRes.data || [], rRes.data || [], sRes.data || []);
+    const isDeadRow = (name, row) => {
+      if(name === 'months')          return !!row.deleted_at || dead.deadMonthIds.has(row.id);
+      if(name === 'roster')          return !!row.deleted_at || dead.deadRosterIds.has(row.id);
+      if(name === 'students')        return dead.deadStudentIds.has(row.id);
+      if(name === 'session_records') return dead.deadStudentIds.has(row.student_id);
+      if(name === 'month_summary')   return dead.deadMonthIds.has(row.month_id);
+      return false;
+    };
+
+    // (2) ارفع الأحياء فقط
     for(const t of tables){
-      const rows = await idbGetAll(t.name);
+      const all = await idbGetAll(t.name);
+      const rows = all.filter(r => !isDeadRow(t.name, r));
       if(!rows.length) continue;
 
       // نرفع على دفعات (500 صف) لتفادي الطلبات الضخمة
@@ -1702,12 +1822,8 @@ async function backgroundSync(){
 
   backgroundSyncing = true;
   try{
-    // نرفع أي تعديلات معلقة أولاً (حتى تصل للأجهزة الأخرى)، ثم نسحب أحدث نسخة
-    await processSyncQueue();
-    const result = await refreshFromCloud();
-    if(!result || result.ok !== false){
-      await refreshCurrentView();
-    }
+    // دورة كاملة عبر single-flight (تضمن عدم التسابق مع أي دورة أخرى)
+    await requestSync('background');
   } catch(err){
     console.error('backgroundSync failed', err);
   } finally {
@@ -1733,9 +1849,9 @@ function setupRealtime(){
 
     let debounceTimer = null;
     const onRemoteChange = () => {
-      // نُجمّع التغييرات المتتالية في نافذة قصيرة لتفادي سحب متكرر
+      // Realtime لا ينفّذ push مباشرة: يطلب دورة واحدة عبر نفس single-flight فقط
       if(debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => { backgroundSync(); }, 800);
+      debounceTimer = setTimeout(() => { if(isOnline && document.visibilityState === 'visible') requestSync('realtime'); }, 800);
     };
 
     realtimeChannel = sb
@@ -1753,8 +1869,8 @@ function setupRealtime(){
 
 // عند رجوع التطبيق للواجهة، نزامن فوراً بدل انتظار الدورة القادمة
 document.addEventListener('visibilitychange', () => {
-  if(document.visibilityState === 'visible'){
-    backgroundSync();
+  if(document.visibilityState === 'visible' && isOnline){
+    requestSync('visible');
   }
 });
 
@@ -1795,9 +1911,8 @@ function setSession(){
 // خطوات ما بعد نجاح الدخول
 async function startupAfterLogin(){
   await runOneTimeRecoveryPush();
-  await refreshFromCloud();
+  await requestSync('login');
   showApp();
-  processSyncQueue();
   startAutoSync();
 }
 
@@ -2041,7 +2156,8 @@ function showApp(){
    الشهور
    ============================================ */
 async function loadMonths(){
-  months = await idbGetAll('months');
+  // دفاع: لا نعرض أي شهر عليه tombstone (المحلي مكنوس أصلاً، لكن هذا يضمن عدم ظهوره مطلقاً)
+  months = (await idbGetAll('months')).filter(m => !m.deleted_at);
   months.sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
   renderMonths();
 }
@@ -2089,7 +2205,7 @@ async function openAddMonthModal(){
   if(allRadio) allRadio.checked = true;
 
   // تحميل القائمة الأساسية للطلاب وتحديد الكل مبدئياً
-  migrateRoster = await idbGetAll('roster');
+  migrateRoster = (await idbGetAll('roster')).filter(r => !r.deleted_at);
   migrateRoster.sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
   migrateSelected = new Set(migrateRoster.map(r => r.id));
 
@@ -2202,9 +2318,9 @@ async function submitAddMonth(){
   // نحدد قائمة الطلاب المرشّحين للترحيل حسب الوضع المختار
   let toMigrate = [];
   if(mode === 'all'){
-    toMigrate = await idbGetAll('roster');
+    toMigrate = (await idbGetAll('roster')).filter(r => !r.deleted_at);
   } else if(mode === 'custom'){
-    const all = await idbGetAll('roster');
+    const all = (await idbGetAll('roster')).filter(r => !r.deleted_at);
     toMigrate = all.filter(r => migrateSelected.has(r.id));
   } // mode === 'empty' → تبقى فارغة
 
@@ -2270,13 +2386,9 @@ async function deleteMonth(month){
     // حذف الشهر نفسه
     await idbDelete('months', month.id);
 
-    // تسجيل عمليات الحذف في قائمة المزامنة (لحذفها من Supabase عند توفر النت)
-    await idbAddToQueue({ table: 'session_records', action: 'delete_by', payload: { column: 'month_id', value: month.id } });
-    await idbAddToQueue({ table: 'students', action: 'delete_by', payload: { column: 'month_id', value: month.id } });
-    await idbAddToQueue({ table: 'month_summary', action: 'delete', payload: { id: month.id } });
-    await idbAddToQueue({ table: 'months', action: 'delete', payload: { id: month.id } });
-
-    if(isOnline) processSyncQueue();
+    // Phase 4.1: tombstone واحد على الشهر فقط. الطلاب/السجلات/الملخص حُذفوا محلياً أعلاه،
+    // وعلى الأجهزة الأخرى يُشتقّون موتى من حذف الشهر (buildDeadSets) — بلا delete/delete_by.
+    await enqueueSoftDelete('months', month.id);
 
     months = months.filter(m => m.id !== month.id);
     renderMonths();
@@ -2285,7 +2397,7 @@ async function deleteMonth(month){
     console.error('deleteMonth failed', month, err);
     // نعيد تحميل الحالة الفعلية من IndexedDB بدل ترك الواجهة في حالة غير معروفة
     // بعد فشل جزئي محتمل في منتصف عملية الحذف متعددة الخطوات
-    months = await idbGetAll('months');
+    months = (await idbGetAll('months')).filter(m => !m.deleted_at);
     months.sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
     renderMonths();
     showToast('حدث خطأ أثناء حذف الشهر — قد تكون العملية غير مكتملة، برجاء المحاولة مرة أخرى');
@@ -2347,7 +2459,7 @@ function switchTab(tab){
    ============================================ */
 async function loadStudents(){
   const allStudents = await idbGetAll('students');
-  students = allStudents.filter(s => s.month_id === currentMonth.id);
+  students = allStudents.filter(s => s.month_id === currentMonth.id && !s.deleted_at);
   students.sort((a,b) => a.display_order - b.display_order);
 
   const allRecords = await idbGetAll('session_records');
@@ -2798,13 +2910,13 @@ function confirmRemoveFromMonth(studentId, name){
   document.getElementById('confirmText').textContent = `هل تريد حذف الطالب "${name}" من هذا الشهر فقط؟ سيبقى موجوداً في باقي الشهور ببياناته كاملة.`;
   const btn = document.getElementById('confirmActionBtn');
   btn.onclick = async () => {
+    // حذف محلي فوري لسجلات الطالب (مشتقّة من tombstone الطالب على الأجهزة الأخرى)
     const allRecords = await idbGetAll('session_records');
     for(const rec of allRecords){
       if(rec.student_id === studentId) await idbDelete('session_records', rec.id);
     }
-    await idbAddToQueue({ table: 'session_records', action: 'delete_by', payload: { column: 'student_id', value: studentId } });
 
-    const result = await deleteLocal('students', studentId);
+    const result = await enqueueSoftDelete('students', studentId);
     closeModal('modalConfirm');
 
     if(result && result.savedLocally === false){
@@ -2825,11 +2937,18 @@ function confirmDeleteStudent(studentId, rosterId, name){
   document.getElementById('confirmText').textContent = `هل تريد حذف الطالب "${name}" نهائياً من كل الشهور؟ سيتم حذف كل سجلاته وبياناته بشكل كامل ولا يمكن التراجع عن هذا.`;
   const btn = document.getElementById('confirmActionBtn');
   btn.onclick = async () => {
-    const result1 = await deleteLocalBy('students', 'roster_id', rosterId, (item) => item.roster_id === rosterId);
-    const result2 = await deleteLocal('roster', rosterId);
+    // حذف محلي فوري لكل نسخ الطالب عبر الشهور وسجلاتها (تُشتقّ موتى من tombstone الـroster)
+    const allStudents = await idbGetAll('students');
+    const victimIds = new Set(allStudents.filter(s => s.roster_id === rosterId).map(s => s.id));
+    const allRecords = await idbGetAll('session_records');
+    for(const rec of allRecords){ if(victimIds.has(rec.student_id)) await idbDelete('session_records', rec.id); }
+    for(const sid of victimIds){ await idbDelete('students', sid); }
+
+    // tombstone واحد على roster فقط
+    const result2 = await enqueueSoftDelete('roster', rosterId);
     closeModal('modalConfirm');
 
-    if((result1 && result1.savedLocally === false) || (result2 && result2.savedLocally === false)){
+    if(result2 && result2.savedLocally === false){
       showToast('تعذر حذف الطالب بالكامل — حاول مرة أخرى');
       return;
     }
