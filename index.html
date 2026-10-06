@@ -781,8 +781,7 @@
     <div class="login-emblem">📖</div>
     <h1>دار الأرقم</h1>
     <p class="sub">متابعة حفظ القرآن الكريم</p>
-    <!-- Phase 3A (انتقالي): يقبل بريداً أو اسم مستخدم قديماً. يصبح بريداً فقط في مرحلة Auth-only. -->
-    <input type="text" id="loginUser" placeholder="البريد الإلكتروني أو اسم المستخدم" autocomplete="username" dir="auto">
+    <input type="email" id="loginUser" placeholder="البريد الإلكتروني" autocomplete="email" inputmode="email" dir="ltr">
     <input type="password" id="loginPass" placeholder="كلمة المرور" autocomplete="current-password">
     <button class="btn-primary" onclick="handleLogin()">دخول</button>
     <div class="error-msg" id="loginError"></div>
@@ -1728,12 +1727,7 @@ function setSession(){
   localStorage.setItem('dar_alarqam_session_at', String(Date.now()));
 }
 
-// تحقق بسيط ومحافظ من كون القيمة بريداً إلكترونياً (للتوجيه في الوضع المزدوج فقط)
-function isValidEmail(v){
-  return typeof v === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
-}
-
-// خطوات ما بعد نجاح الدخول (مشتركة بين كل المسارات)
+// خطوات ما بعد نجاح الدخول
 async function startupAfterLogin(){
   await runOneTimeRecoveryPush();
   await refreshFromCloud();
@@ -1749,52 +1743,27 @@ async function handleLogin(){
   errEl.textContent = '';
 
   if(!identifier || !password){
-    errEl.textContent = 'من فضلك ادخل البريد الإلكتروني (أو اسم المستخدم) وكلمة المرور';
+    errEl.textContent = 'من فضلك ادخل البريد الإلكتروني وكلمة المرور';
     return;
   }
 
-  // أثناء الوضع المزدوج: لا نرسل إلى Supabase Auth إلا قيمة تبدو بريداً صالحاً.
-  // اسم المستخدم القديم (غير البريد) يذهب لمسار app_users فقط.
-  const looksLikeEmail = isValidEmail(identifier);
-
   if(isOnline){
-    // (1) المسار الجديد: Supabase Auth بالبريد + كلمة المرور (فقط إذا كانت القيمة بريداً صالحاً).
-    //     النجاح يحفظ جلسة مُدارة من Supabase (دون تخزين كلمة المرور عندنا).
-    if(looksLikeEmail){
-      try{
-        const { data, error } = await sb.auth.signInWithPassword({ email: identifier, password });
-        if(!error && data && data.session){
-          setSession(); // علم محلي للدخول دون نت لاحقاً فقط — لا كلمة مرور
-          try{ await idbPut('meta', { key: 'auth_email', value: { email: identifier } }); }catch(e){}
-          await startupAfterLogin();
-          return;
-        }
-      } catch(e){ console.error('auth signIn failed', e); }
-    }
-
-    // (2) fallback مؤقت أثناء الانتقال فقط: النظام القديم app_users (اسم مستخدم + كلمة مرور).
-    //     يُزال في مرحلة لاحقة (Auth-only) بعد تأكيد الدخول الجديد.
+    // الدخول عبر Supabase Auth فقط (بريد + كلمة مرور). لا يُخزَّن أي كلمة مرور محلياً.
     try{
-      const { data, error } = await sb
-        .from('app_users')
-        .select('*')
-        .eq('username', identifier)
-        .eq('password', password)
-        .maybeSingle();
-      if(!error && data){
-        await idbPut('meta', { key: 'cached_user', value: { username: identifier, password } });
-        setSession();
+      const { data, error } = await sb.auth.signInWithPassword({ email: identifier, password });
+      if(!error && data && data.session){
+        setSession(); // علم محلي للدخول دون نت لاحقاً فقط — لا كلمة مرور
+        try{ await idbPut('meta', { key: 'auth_email', value: { email: identifier } }); }catch(e){}
         await startupAfterLogin();
         return;
       }
-    } catch(e){ console.error(e); }
+    } catch(e){ console.error('auth signIn failed', e); }
 
-    errEl.textContent = 'بيانات الدخول غير صحيحة';
+    errEl.textContent = 'البريد الإلكتروني أو كلمة المرور غير صحيحة';
     return;
   }
 
-  // دون إنترنت: نقبل الدخول فقط إذا كانت هناك جلسة سابقة ناجحة على هذا الجهاز.
-  // (أ) جلسة Supabase Auth محفوظة؟
+  // دون إنترنت: نقبل الدخول فقط إذا كانت هناك جلسة Supabase Auth سابقة محفوظة على هذا الجهاز.
   try{
     const { data } = await sb.auth.getSession();
     if(data && data.session){
@@ -1803,13 +1772,6 @@ async function handleLogin(){
       return;
     }
   }catch(e){}
-  // (ب) أو بيانات النظام القديم المخزَّنة (أثناء الانتقال)
-  const cached = await idbGet('meta', 'cached_user');
-  if(cached && cached.value.username === identifier && cached.value.password === password){
-    setSession();
-    showApp();
-    return;
-  }
 
   errEl.textContent = 'لا يمكن تسجيل الدخول لأول مرة بدون إنترنت. تأكد من الاتصال أول مرة فقط';
 }
