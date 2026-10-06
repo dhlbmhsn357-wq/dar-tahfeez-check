@@ -1435,6 +1435,14 @@ async function initApp(){
     return;
   }
 
+  // تنظيف لمرة واحدة (idempotent): إزالة بيانات الدخول القديمة المخزّنة محلياً
+  // (اسم مستخدم/كلمة مرور بنص صريح) من حقبة ما قبل Supabase Auth.
+  // يحذف فقط meta.cached_user إن وُجد، ولا يلمس membership/auth_email/recovery_push_done أو غيرها.
+  try{
+    const legacyCred = await idbGet('meta', 'cached_user');
+    if(legacyCred){ await idbDelete('meta', 'cached_user'); }
+  }catch(e){ /* فشل التنظيف لا يجب أن يمنع الإقلاع */ }
+
   try{
     updateConnectionUI();
 
