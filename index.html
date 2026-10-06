@@ -999,7 +999,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
    + قائمة عمليات معلقة (sync queue) للمزامنة لاحقاً
    ============================================ */
 const DB_NAME = 'dar_alarqam_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // v2: + conflicts store (Phase 4.2)
 let idb = null;
 
 function openIDB(){
@@ -1014,6 +1014,8 @@ function openIDB(){
       if(!db.objectStoreNames.contains('month_summary')) db.createObjectStore('month_summary', { keyPath: 'id' });
       if(!db.objectStoreNames.contains('sync_queue')) db.createObjectStore('sync_queue', { keyPath: 'localId', autoIncrement: true });
       if(!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'key' });
+      // Phase 4.2: conflict records (revision CAS). key = `${table}:${rowKey}`
+      if(!db.objectStoreNames.contains('conflicts')) db.createObjectStore('conflicts', { keyPath: 'key' });
     };
     req.onsuccess = (e) => { idb = e.target.result; resolve(idb); };
     req.onerror = (e) => reject(e.target.error);
@@ -1156,77 +1158,66 @@ async function processSyncQueue(){
   if(queue.length === 0) return true;
 
   let allSucceeded = true;
-
-  // ترتيب حسب وقت الإنشاء لضمان التتابع الصحيح
   queue.sort((a,b) => a.createdAt - b.createdAt);
 
   for(const op of queue){
+    // skip conflicts (not retried, not dropped) — await 4.3 resolution
+    if(op.status && op.status !== 'pending') continue;
+    // safety: any residual legacy hard-delete op (server rejects it now)
+    if(op.action === 'delete' || op.action === 'delete_by'){ await idbDelete('sync_queue', op.localId); continue; }
+
     try{
-      // حزام أمان: الحذف الصلب أُلغي في Phase 4.1 (الخادم يرفضه). أي op قديمة من هذا النوع
-      // تُزال بلا إرسال (التعقيم في syncCycle يسبقها عادةً).
-      if(op.action === 'delete' || op.action === 'delete_by'){
+      // ---- tombstone (soft delete): unconditional, delete-wins, idempotent server-side ----
+      if(op.kind === 'tombstone'){
+        const { data, error } = await sb.rpc('rev_soft_delete', { p_table: op.table, p_id: op.payload.id });
+        if(error){ allSucceeded = false; await bumpFail(op, 'rev_soft_delete', error); continue; }
+        // applied | already_deleted | missing → done
         await idbDelete('sync_queue', op.localId);
         continue;
       }
 
-      let result;
-      if(op.action === 'upsert'){
-        // upsert معتمد على قيود UNIQUE الموجودة فعلاً في القاعدة
-        // (session_records(student_id,session_number) و month_summary(month_id)).
-        // ملاحظة مهمة: لا نلجأ أبداً إلى حذف ثم إدخال عند فشل الـ upsert.
-        result = await sb.from(op.table).upsert(op.payload, op.conflictKey ? { onConflict: op.conflictKey } : undefined).select();
-      } else if(op.action === 'insert'){
-        result = await sb.from(op.table).insert(op.payload).select();
-        // لو الإدخال فشل لأن الصف موجود بالفعل (تكرار مفتاح)، نعتبره نجاحاً منطقياً
-        if(result && result.error && (result.error.code === '23505' || /duplicate/i.test(result.error.message || ''))){
-          result = { error: null, data: [] };
-        }
-      } else if(op.action === 'update'){
-        result = await sb.from(op.table).update(op.payload.values).eq('id', op.payload.id).select();
+      // ---- content: insert or CAS update ----
+      const { data, error } = await sb.rpc('rev_apply', {
+        p_table: op.table, p_payload: op.payload, p_base_revision: op.base_revision || null
+      });
+      if(error){ allSucceeded = false; await bumpFail(op, 'rev_apply', error); continue; }
+
+      const status = data && data.status;
+      if(status === 'applied'){
+        if(data.revision != null){ op.payload.revision = String(data.revision); await idbPut(op.table, op.payload); }
+        await idbDelete('sync_queue', op.localId);
+      } else if(status === 'exists_identical'){
+        await canonicalizeAdopt(op, data.cloud_row);           // adopt canonical id/revision, drop local dup
+      } else if(status === 'superseded_by_delete'){
+        await idbDelete(op.table, op.payload.id);              // delete-wins
+        await logCancellation(op, 'superseded_by_delete');
+        await idbDelete('sync_queue', op.localId);
+      } else if(status === 'conflict'){
+        await persistConflict(op, data, 'conflict');           // keep both sides for 4.3; no overwrite, no retry
+      } else {
+        // unknown status: treat as transient failure (do not drop)
+        allSucceeded = false; await bumpFail(op, 'rev_apply', { message: 'unknown status: ' + status });
       }
-
-      if(result && result.error){
-        console.error('Sync error for op', op, result.error);
-        allSucceeded = false;
-
-        // نحفظ تفاصيل آخر خطأ مزامنة لعرضه للمستخدم عند الحاجة (لتشخيص سبب فشل الرفع الحقيقي)
-        lastSyncError = {
-          table: op.table,
-          action: op.action,
-          message: result.error.message || 'خطأ غير معروف',
-          code: result.error.code || '',
-          details: result.error.details || '',
-          hint: result.error.hint || '',
-          at: new Date().toISOString()
-        };
-
-        // نتتبّع عدد مرات الفشل المتتالي لهذه العملية. إذا فشلت كثيراً (10 مرات)،
-        // نزيلها من الطابور حتى لا تبقى عالقة للأبد وتُبطئ كل مزامنة تالية.
-        op.failCount = (op.failCount || 0) + 1;
-        if(op.failCount >= 10){
-          console.warn('إسقاط عملية مزامنة فاشلة بشكل دائم بعد 10 محاولات', op);
-          await idbDelete('sync_queue', op.localId);
-        } else {
-          await idbPut('sync_queue', op); // نحفظ عدّاد الفشل المحدّث
-        }
-        continue;
-      }
-
-      // نجحت العملية - نحذفها من الطابور
-      await idbDelete('sync_queue', op.localId);
     } catch(err){
       console.error('Sync exception for op', op, err);
-      lastSyncError = {
-        table: op.table, action: op.action,
-        message: (err && err.message) || String(err),
-        code: 'EXCEPTION', at: new Date().toISOString()
-      };
-      // مشكلة في الشبكة وقت المزامنة - نوقف ونحاول تاني لما النت يرجع فعلياً
+      lastSyncError = { table: op.table, action: op.kind || op.op, message: (err && err.message) || String(err), code: 'EXCEPTION', at: new Date().toISOString() };
+      // network issue — stop; retry when back online
       return false;
     }
   }
-
   return allSucceeded;
+}
+
+// shared failure bookkeeping (transient server/network errors). Never drops a content op silently
+// on a logical conflict (those go to persistConflict); only truly stuck ops are capped.
+async function bumpFail(op, where, error){
+  console.error('Sync error for op', where, op, error);
+  lastSyncError = { table: op.table, action: op.kind || op.op || where,
+    message: (error && error.message) || 'خطأ غير معروف', code: (error && error.code) || '',
+    details: (error && error.details) || '', hint: (error && error.hint) || '', at: new Date().toISOString() };
+  op.failCount = (op.failCount || 0) + 1;
+  if(op.failCount >= 10){ console.warn('إسقاط عملية فاشلة بعد 10 محاولات', op); await idbDelete('sync_queue', op.localId); }
+  else await idbPut('sync_queue', op);
 }
 
 /* ============================================
@@ -1292,7 +1283,8 @@ async function refreshFromCloud(){
     // derivation: نبني مجموعات الموتى من المسحوب (+ المحلي احتياطاً) لتطبيق tombstones.
     // delete-wins: الصف الميت يُحذف محلياً دائماً (يتجاوز pending)؛ الحي يُكتب ما لم يكن معلقاً.
     const dead = await buildDeadSets(monthsRes.data || [], rosterRes.data || [], studentsRes.data || []);
-    const putIfLive = async (store, row) => { if(!skipIfPending(store, row)) await idbPut(store, row); };
+    // keep revision as decimal string locally; pending/conflict rows are protected from overwrite
+    const putIfLive = async (store, row) => { normRev(row); if(!skipIfPending(store, row)) await idbPut(store, row); };
 
     if(monthsRes.data) for(const m of monthsRes.data){
       if(m.deleted_at || dead.deadMonthIds.has(m.id)) await idbDelete('months', m.id); else await putIfLive('months', m);
@@ -1309,6 +1301,20 @@ async function refreshFromCloud(){
     if(summaryRes.data) for(const sm of summaryRes.data){
       if(dead.deadMonthIds.has(sm.month_id)) await idbDelete('month_summary', sm.id); else await putIfLive('month_summary', sm);
     }
+
+    // refresh the cloud side of any stored conflicts to the latest pulled rows (for 4.3 to resolve against current)
+    try{
+      const conflicts = await idbGetAll('conflicts');
+      if(conflicts.length){
+        const byTable = { months: monthsRes.data||[], roster: rosterRes.data||[], students: studentsRes.data||[], session_records: recordsRes.data||[], month_summary: summaryRes.data||[] };
+        const maps = {};
+        for(const t of REV_TABLES){ const m = new Map(); for(const r of byTable[t]) m.set(rowKeyFor(t, r), r); maps[t] = m; }
+        for(const c of conflicts){
+          const cur = maps[c.table] && maps[c.table].get(c.rowKey);
+          if(cur){ c.cloud_row = cur; c.cloud_revision = cur.revision != null ? String(cur.revision) : null; await idbPut('conflicts', c); }
+        }
+      }
+    }catch(e){ console.error('conflict cloud refresh failed', e); }
 
     return { ok: true };
   } catch(err){
@@ -1349,6 +1355,115 @@ async function logCancellation(op, reason){
     while(arr.length > 200) arr.shift();
     await idbPut('meta', { key: 'tombstone_cancellations', value: arr });
   }catch(e){ console.error('logCancellation failed', e); }
+}
+
+/* ============================================
+   Phase 4.2 — server revision (CAS) client helpers
+   revision is an OPAQUE DECIMAL STRING everywhere (never Number/BigInt).
+   ============================================ */
+const REV_TABLES = ['months','roster','students','session_records','month_summary'];
+function matchKeyFor(table){
+  return table === 'session_records' ? 'student_id,session_number'
+       : table === 'month_summary'   ? 'month_id'
+       : 'id';
+}
+function rowKeyFor(table, o){
+  if(!o) return '';
+  if(table === 'session_records') return String(o.student_id) + ':' + String(o.session_number);
+  if(table === 'month_summary')   return String(o.month_id);
+  return String(o.id);
+}
+function normRev(row){ // coerce revision to decimal string in place
+  if(row && row.revision != null) row.revision = String(row.revision);
+  return row;
+}
+const conflictKeyOf = (table, o) => table + ':' + rowKeyFor(table, o);
+
+// find a queue op (content) targeting the same logical row
+async function findQueueOpForRow(table, rowKey){
+  const q = await idbGetAll('sync_queue');
+  for(const op of q){
+    if(op.table === table && op.kind === 'content' && rowKeyFor(table, op.payload) === rowKey) return op;
+  }
+  return null;
+}
+
+// persist a conflict (never overwrite local; never drop silently)
+async function persistConflict(op, data, status){
+  const rowKey = rowKeyFor(op.table, op.payload);
+  const rec = {
+    key: conflictKeyOf(op.table, op.payload),
+    table: op.table, matchKey: op.matchKey || matchKeyFor(op.table), rowKey,
+    local_payload: op.payload, base_revision: op.base_revision || null,
+    cloud_row: data.cloud_row || null,
+    cloud_revision: data.cloud_revision != null ? String(data.cloud_revision) : null,
+    reason: data.reason || 'revision_mismatch',
+    status: status || 'conflict', detected_at: new Date().toISOString()
+  };
+  await idbPut('conflicts', rec);
+  op.status = 'conflict';
+  op.conflict = { cloud_row: rec.cloud_row, cloud_revision: rec.cloud_revision, reason: rec.reason, detected_at: rec.detected_at };
+  await idbPut('sync_queue', op); // kept, NOT retried (push skips non-pending), NOT dropped
+}
+
+// adopt canonical cloud row on exists_identical; drop local duplicate id if different
+async function canonicalizeAdopt(op, cloudRow){
+  normRev(cloudRow);
+  const oldId = op.payload.id;
+  if(cloudRow.id && cloudRow.id !== oldId){
+    await idbDelete(op.table, oldId);                 // remove local duplicate (old id)
+    await idbPut(op.table, cloudRow);                 // canonical
+    // repoint any other queue ops referencing the old id for this table
+    const q = await idbGetAll('sync_queue');
+    for(const o2 of q){
+      if(o2.localId === op.localId) continue;
+      if(o2.table === op.table && o2.payload && o2.payload.id === oldId){ o2.payload.id = cloudRow.id; await idbPut('sync_queue', o2); }
+    }
+    try{ await idbDelete('conflicts', conflictKeyOf(op.table, {id: oldId})); }catch(e){}
+  } else {
+    await idbPut(op.table, cloudRow);
+  }
+  await idbDelete('sync_queue', op.localId);
+}
+
+// separate read-only pull → cloudMap keyed by natural key (for legacy migration; does NOT touch local dirty rows)
+async function pullCloudMap(){
+  const out = {};
+  for(const t of REV_TABLES){
+    const res = await fetchAllRows(t);
+    if(res.error) throw res.error;
+    const m = new Map();
+    for(const row of (res.data || [])){ normRev(row); m.set(rowKeyFor(t, row), { cloud_row: row, cloud_revision: row.revision != null ? String(row.revision) : null }); }
+    out[t] = m;
+  }
+  return out;
+}
+
+// one-time: convert legacy content ops (no base_revision) to legacy_conflict via cloudMap.
+// Never fake-rebases, never pushes over cloud, never overwrites the dirty local row.
+async function migrateLegacyQueueOnce(){
+  try{
+    const flag = await idbGet('meta', 'phase42_legacy_migrated');
+    if(flag && flag.value === true) return;
+    if(!isOnline) return; // needs a pull; retry next online startup
+    const maps = await pullCloudMap();
+    const q = await idbGetAll('sync_queue');
+    for(const op of q){
+      if(op.kind) continue;                               // already 4.2-shaped
+      if(op.action === 'delete' || op.action === 'delete_by') continue; // handled by 4.1 sanitation
+      const rowKey = rowKeyFor(op.table, op.payload || {});
+      const c = (maps[op.table] && maps[op.table].get(rowKey)) || { cloud_row: null, cloud_revision: null };
+      await idbPut('conflicts', {
+        key: conflictKeyOf(op.table, op.payload || {}),
+        table: op.table, matchKey: matchKeyFor(op.table), rowKey,
+        local_payload: op.payload, base_revision: null,
+        cloud_row: c.cloud_row, cloud_revision: c.cloud_revision,
+        reason: 'unknown_base_revision', status: 'legacy_conflict', detected_at: new Date().toISOString()
+      });
+      await idbDelete('sync_queue', op.localId);           // remove from active push; local row untouched
+    }
+    await idbPut('meta', { key: 'phase42_legacy_migrated', value: true });
+  }catch(e){ console.error('migrateLegacyQueueOnce failed', e); /* retry next online startup */ }
 }
 
 // يفحص العمليات نفسها (لا cloud rows): يلغي أي op على كيان ميت أو تابع لميت،
@@ -1454,12 +1569,32 @@ function genId(){
 
 async function writeLocal(table, record, action='upsert', conflictKey=null){
   try{
+    normRev(record); // revision stays a decimal string locally
+    const matchKey = conflictKey || matchKeyFor(table);
+    const rowKey = rowKeyFor(table, record);
+    const existing = await findQueueOpForRow(table, rowKey);
+    // capture base_revision from the CURRENT local row BEFORE overwriting (null = first insert)
+    const priorLocal = await idbGet(table, record.id);
+    // carry revision forward so the stored local row keeps its base even if the caller omitted it
+    if(record.revision == null && priorLocal && priorLocal.revision != null) record.revision = String(priorLocal.revision);
     await idbPut(table, record);
-    await idbAddToQueue({ table, action, payload: record, conflictKey });
+
+    if(existing && existing.status === 'pending'){
+      // coalesce: keep first base_revision/localId/createdAt; update to latest local state
+      existing.payload = record;
+      await idbPut('sync_queue', existing);
+    } else if(existing && existing.status && existing.status !== 'pending'){
+      // a conflict is pending for this row → keep it a conflict (4.3); refresh its local side
+      try{
+        const c = await idbGet('conflicts', conflictKeyOf(table, record));
+        if(c){ c.local_payload = record; await idbPut('conflicts', c); }
+      }catch(e){}
+    } else {
+      const base = (priorLocal && priorLocal.revision != null) ? String(priorLocal.revision) : null;
+      await idbAddToQueue({ table, kind: 'content', op: base === null ? 'insert' : 'update',
+        payload: record, matchKey, base_revision: base, status: 'pending' });
+    }
   } catch(err){
-    // فشل الحفظ حتى محلياً (مثلاً: مساحة تخزين ممتلئة أو خطأ في IndexedDB).
-    // نرجع نتيجة واضحة بدل ترك استثناء غير مُعالَج يختفي بصمت ويجعل المستخدم
-    // يظن أن البيانات حُفظت بينما لم تُحفظ فعلياً في أي مكان.
     console.error('writeLocal failed', table, err);
     return { savedLocally: false, syncedNow: false, error: err };
   }
@@ -1485,7 +1620,7 @@ async function writeLocal(table, record, action='upsert', conflictKey=null){
 async function enqueueSoftDelete(table, id){
   try{
     await idbDelete(table, id);
-    await idbAddToQueue({ table, action: 'update', payload: { id, values: { deleted_at: new Date().toISOString() } } });
+    await idbAddToQueue({ table, kind: 'tombstone', payload: { id }, status: 'pending' });
   } catch(err){
     console.error('enqueueSoftDelete failed', table, id, err);
     return { savedLocally: false };
@@ -1586,6 +1721,7 @@ async function initApp(){
         }
         // إصلاح لمرة واحدة: ترفع الأجهزة القديمة بياناتها المحلية الصحيحة للسحابة
         await runOneTimeRecoveryPush();
+        await migrateLegacyQueueOnce();   // Phase 4.2: convert legacy ops → legacy_conflict before any push
         await requestSync('startup');
         startAutoSync();
       } catch(netErr){
@@ -1911,6 +2047,7 @@ function setSession(){
 // خطوات ما بعد نجاح الدخول
 async function startupAfterLogin(){
   await runOneTimeRecoveryPush();
+  await migrateLegacyQueueOnce();   // Phase 4.2: convert legacy ops → legacy_conflict before any push
   await requestSync('login');
   showApp();
   startAutoSync();
