@@ -788,6 +788,16 @@
   </div>
 </div>
 
+<!-- ============ MEMBERSHIP STATUS SCREEN (Phase 3B) ============ -->
+<div id="membershipScreen" style="display:none; position:fixed; inset:0; align-items:center; justify-content:center; padding:16px;">
+  <div class="login-card">
+    <div class="login-emblem">📖</div>
+    <h1 id="membershipTitle"></h1>
+    <p class="sub" id="membershipMsg"></p>
+    <button class="btn-primary" onclick="handleLogout()">تسجيل الخروج</button>
+  </div>
+</div>
+
 <!-- ============ APP SCREEN ============ -->
 <div id="appScreen">
   <header class="topbar">
@@ -1405,12 +1415,30 @@ async function initApp(){
     // checkSession تقرأ من localStorage مباشرة (بدون أي نداء شبكة)، فهي لا تفشل أوفلاين.
     const hasSession = checkSession();
 
-    // كل ما يلي متعلق بالشبكة فقط، ومحاط بحمايته الخاصة حتى لا يمنع فتح التطبيق أوفلاين
+    // دون نت عند الإقلاع: fail-closed — لا نعرض التطبيق إلا بـ cache موثوق لنفس UID وactive=true
+    if(hasSession && !isOnline){
+      const t = await readTrustedMembership();
+      if(!(t && t.active === true)){
+        showMembershipStatus(t && t.active === false ? 'inactive' : 'verify_failed');
+        return;
+      }
+    }
+
+    // أونلاين: نتحقق من العضوية قبل تحميل أي بيانات
     if(hasSession && isOnline){
       try{
-        // نتأكد أن جلسة Supabase Auth مُحمَّلة (ومجدَّدة إن لزم) قبل أي نداء بيانات،
-        // حتى تحمل الطلبات رمز المستخدم الصحيح. لا تفشل لو كان المستخدم على النظام القديم.
+        // نتأكد أن جلسة Supabase Auth مُحمَّلة (ومجدَّدة إن لزم) قبل أي نداء بيانات.
         try{ await sb.auth.getSession(); }catch(e){}
+        const m = await fetchMembership();
+        if(m.state === 'active'){
+          await cacheMembership(m);
+        } else {
+          if(m.user_id && (m.state === 'inactive' || m.state === 'none')){
+            await cacheMembership({ user_id: m.user_id, active: false, role: m.role });
+          }
+          showMembershipStatus(m.state); // inactive | none | verify_failed
+          return;
+        }
         // إصلاح لمرة واحدة: ترفع الأجهزة القديمة بياناتها المحلية الصحيحة للسحابة
         await runOneTimeRecoveryPush();
         await refreshFromCloud();
@@ -1736,6 +1764,84 @@ async function startupAfterLogin(){
   startAutoSync();
 }
 
+// ===== عضوية المستخدم (Phase 3B) — بوابة fail-closed مربوطة بـ auth.uid() =====
+// الحالات: 'active' دخول طبيعي | 'inactive' بانتظار التفعيل | 'none' غير مُهيأ
+//          | 'verify_failed' تعذّر التحقق (لا دخول — نحتاج اتصالاً للتحقق)
+// مبدأ fail-closed: لا نعرض التطبيق إطلاقاً إلا بتأكيد active (أونلاين)،
+// أو بـ cache موثوق لنفس UID الحالي وactive=true (أوفلاين).
+
+// يجلب العضوية من السحابة. يرجّع كائناً فيه الحالة وuser_id وactive وrole.
+async function fetchMembership(){
+  try{
+    const { data: { user } } = await sb.auth.getUser();
+    if(!user) return { state: 'verify_failed' };
+    const { data, error } = await sb.from('profiles').select('active, role').eq('id', user.id).maybeSingle();
+    if(error) return { state: 'verify_failed', user_id: user.id };
+    if(!data) return { state: 'none', user_id: user.id };
+    return { state: data.active ? 'active' : 'inactive', user_id: user.id, active: data.active === true, role: data.role };
+  }catch(e){ console.error('fetchMembership failed', e); return { state: 'verify_failed' }; }
+}
+
+// cache العضوية (مربوط دائماً بـ user_id). يحوي: user_id, active, role, verified_at.
+async function cacheMembership(m){
+  if(!m || !m.user_id) return;
+  try{
+    await idbPut('meta', { key: 'membership', value: {
+      user_id: m.user_id, active: (m.active === true), role: m.role || null, verified_at: Date.now()
+    }});
+  }catch(e){}
+}
+
+// user_id للجلسة الحالية (يعمل أوفلاين لأنه يقرأ من التخزين).
+async function sessionUserId(){
+  try{ const { data } = await sb.auth.getSession(); return (data && data.session && data.session.user) ? data.session.user.id : null; }
+  catch(e){ return null; }
+}
+
+// يقرأ الـ cache فقط إذا كان يخص مستخدم الجلسة الحالية؛ وإلا يتجاهله تماماً.
+async function readTrustedMembership(){
+  const uid = await sessionUserId();
+  if(!uid) return null;
+  let c = null; try{ c = await idbGet('meta', 'membership'); }catch(e){}
+  if(c && c.value && c.value.user_id === uid) return c.value;
+  return null; // لا cache، أو cache لحساب آخر → غير موثوق
+}
+
+function showMembershipStatus(state){
+  if(typeof clearStartupWatchdog === 'function') clearStartupWatchdog();
+  const scr = document.getElementById('membershipScreen');
+  const title = document.getElementById('membershipTitle');
+  const msg = document.getElementById('membershipMsg');
+  const login = document.getElementById('loginScreen');
+  const app = document.getElementById('appScreen');
+  if(login) login.style.display = 'none';
+  if(app) app.style.display = 'none';   // fail-closed: لا نعرض التطبيق ولا بياناته
+  if(state === 'none'){
+    if(title) title.textContent = 'الحساب غير مُهيأ';
+    if(msg) msg.textContent = 'حسابك غير مُهيأ بعد. تواصل مع الإدارة لتهيئته.';
+  } else if(state === 'inactive'){
+    if(title) title.textContent = 'بانتظار التفعيل';
+    if(msg) msg.textContent = 'تم إنشاء حسابك وهو بانتظار تفعيل الإدارة.';
+  } else { // verify_failed
+    if(title) title.textContent = 'تعذّر التحقق';
+    if(msg) msg.textContent = 'تعذّر التحقق من صلاحية الحساب. اتصل بالإنترنت للتحقق.';
+  }
+  if(scr) scr.style.display = 'flex';
+}
+
+// بعد دخول ناجح (أونلاين): يتحقق من العضوية ويقرّر الوجهة. fail-closed على verify_failed.
+async function proceedByMembership(){
+  const m = await fetchMembership();
+  if(m.state === 'active'){ await cacheMembership(m); await startupAfterLogin(); return; }
+  if(m.state === 'inactive' || m.state === 'none'){
+    if(m.user_id) await cacheMembership({ user_id: m.user_id, active: false, role: m.role });
+    showMembershipStatus(m.state);
+    return;
+  }
+  // verify_failed: لا نغيّر cache سليماً، ولا نعرض التطبيق
+  showMembershipStatus('verify_failed');
+}
+
 async function handleLogin(){
   const identifier = document.getElementById('loginUser').value.trim();
   const password = document.getElementById('loginPass').value;
@@ -1754,7 +1860,7 @@ async function handleLogin(){
       if(!error && data && data.session){
         setSession(); // علم محلي للدخول دون نت لاحقاً فقط — لا كلمة مرور
         try{ await idbPut('meta', { key: 'auth_email', value: { email: identifier } }); }catch(e){}
-        await startupAfterLogin();
+        await proceedByMembership(); // يتحقق من العضوية ثم يدخل أو يعرض حالة الحساب
         return;
       }
     } catch(e){ console.error('auth signIn failed', e); }
@@ -1763,12 +1869,17 @@ async function handleLogin(){
     return;
   }
 
-  // دون إنترنت: نقبل الدخول فقط إذا كانت هناك جلسة Supabase Auth سابقة محفوظة على هذا الجهاز.
+  // دون إنترنت: نقبل الدخول فقط إذا كانت هناك جلسة Supabase Auth محفوظة،
+  // وcache عضوية موثوق لنفس UID الحالي وactive=true (fail-closed).
   try{
-    const { data } = await sb.auth.getSession();
-    if(data && data.session){
+    const uid = await sessionUserId();
+    if(uid){
       setSession();
-      showApp();
+      const t = await readTrustedMembership(); // يخص UID الحالي فقط
+      if(t && t.active === true){ showApp(); return; }
+      if(t && t.active === false){ showMembershipStatus('inactive'); return; }
+      // لا cache لهذا الحساب (أو لحساب آخر) → ممنوع حتى التحقق أونلاين
+      showMembershipStatus('verify_failed');
       return;
     }
   }catch(e){}
@@ -1782,10 +1893,13 @@ async function handleLogout(){
     try{ sb.removeChannel(realtimeChannel); } catch(e){}
     realtimeChannel = null;
   }
-  // إنهاء جلسة Supabase Auth أيضاً (لا يفشل لو كنا على النظام القديم أو دون نت)
+  // إنهاء جلسة Supabase Auth أيضاً (لا يفشل لو كنا دون نت)
   try{ await sb.auth.signOut(); }catch(e){}
+  try{ await idbDelete('meta', 'membership'); }catch(e){}
   localStorage.removeItem('dar_alarqam_logged_in');
   localStorage.removeItem('dar_alarqam_session_at');
+  const ms = document.getElementById('membershipScreen');
+  if(ms) ms.style.display = 'none';
   document.getElementById('appScreen').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
   document.getElementById('loginUser').value = '';
