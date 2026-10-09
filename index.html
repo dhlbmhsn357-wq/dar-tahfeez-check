@@ -1081,6 +1081,7 @@ function idbAddToQueue(op){
 let isOnline = navigator.onLine;
 let isSyncing = false;
 let lastSyncError = null; // تفاصيل آخر خطأ مزامنة، لعرضه عند تشخيص فشل الرفع
+let syncAttention = { dead:0, review:0, total:0 }; // Phase 4.4: dead-letters + conflicts needing review
 
 function updateConnectionUI(){
   const dot = document.getElementById('statusDot');
@@ -1098,6 +1099,15 @@ function updateConnectionUI(){
     text.textContent = 'جاري المزامنة...';
     banner.className = 'show syncing';
     banner.textContent = '🔄 جاري رفع البيانات المحفوظة...';
+  } else if(syncAttention && syncAttention.total > 0){
+    // Phase 4.4: persistent, visible alert — some edits need attention (never silent loss)
+    dot.className = 'status-dot offline';
+    const parts = [];
+    if(syncAttention.dead > 0)   parts.push('تعذّر رفع ' + syncAttention.dead + ' تعديل');
+    if(syncAttention.review > 0) parts.push(syncAttention.review + ' تعارض بحاجة لمراجعة');
+    text.textContent = 'تنبيه مزامنة';
+    banner.className = 'show offline';
+    banner.textContent = '⚠️ ' + parts.join(' و') + ' — محفوظة على جهازك ولم تُفقد. أعد المحاولة أو راجِع.';
   } else {
     dot.className = 'status-dot';
     text.textContent = 'متصل';
@@ -1216,8 +1226,49 @@ async function bumpFail(op, where, error){
     message: (error && error.message) || 'خطأ غير معروف', code: (error && error.code) || '',
     details: (error && error.details) || '', hint: (error && error.hint) || '', at: new Date().toISOString() };
   op.failCount = (op.failCount || 0) + 1;
-  if(op.failCount >= 10){ console.warn('إسقاط عملية فاشلة بعد 10 محاولات', op); await idbDelete('sync_queue', op.localId); }
-  else await idbPut('sync_queue', op);
+  if(op.failCount >= 10){
+    // Phase 4.4: do NOT silently drop. Move to dead-letter (conflicts store) with the reason/details
+    // and raise a visible app alert so the edit is never lost silently.
+    console.warn('نقل عملية فاشلة دائمًا إلى dead-letter بعد 10 محاولات', op);
+    await deadLetter(op, lastSyncError);
+    await idbDelete('sync_queue', op.localId);
+  } else {
+    await idbPut('sync_queue', op);
+  }
+}
+
+// Phase 4.4: dead-letter store (reuses the conflicts store) + non-silent alert.
+async function deadLetter(op, errInfo){
+  try{
+    const rowKey = rowKeyFor(op.table, op.payload || {});
+    await idbPut('conflicts', {
+      key: 'dead:' + op.table + ':' + rowKey + ':' + (op.localId || Date.now()),
+      table: op.table, matchKey: op.matchKey || matchKeyFor(op.table), rowKey,
+      local_payload: op.payload || null, base_revision: op.base_revision || null, base_row: op.base_row || null,
+      kind: op.kind || null, status: 'dead_letter',
+      reason: (errInfo && (errInfo.code ? (errInfo.code + ' ' + errInfo.message) : errInfo.message)) || 'permanent_failure',
+      error: errInfo || null, detected_at: new Date().toISOString()
+    });
+  }catch(e){ console.error('deadLetter failed', e); }
+}
+
+// counts unresolved items needing attention (dead-letters + same-field conflicts kept for review)
+async function countSyncAttention(){
+  try{
+    const list = await idbGetAll('conflicts');
+    let dead = 0, review = 0;
+    for(const c of list){
+      if(c.status === 'dead_letter') dead++;
+      else if(c.status === 'conflict' || c.status === 'legacy_conflict') review++;
+    }
+    return { dead, review, total: dead + review };
+  }catch(e){ return { dead:0, review:0, total:0 }; }
+}
+
+// Phase 4.4: reflect attention state in a visible, persistent banner (never silent).
+async function renderSyncAlert(){
+  syncAttention = await countSyncAttention();
+  updateConnectionUI();
 }
 
 /* ============================================
@@ -1395,6 +1446,7 @@ async function persistConflict(op, data, status){
     key: conflictKeyOf(op.table, op.payload),
     table: op.table, matchKey: op.matchKey || matchKeyFor(op.table), rowKey,
     local_payload: op.payload, base_revision: op.base_revision || null,
+    base_row: op.base_row || null,
     cloud_row: data.cloud_row || null,
     cloud_revision: data.cloud_revision != null ? String(data.cloud_revision) : null,
     reason: data.reason || 'revision_mismatch',
@@ -1424,6 +1476,68 @@ async function canonicalizeAdopt(op, cloudRow){
     await idbPut(op.table, cloudRow);
   }
   await idbDelete('sync_queue', op.localId);
+}
+
+/* ============================================
+   Phase 4.3 — automatic field-merge on conflict
+   3-way merge (base_row = common ancestor): if each side changed DIFFERENT fields,
+   merge automatically; if the SAME field diverged, keep the conflict for review and
+   overwrite NOTHING. Does not touch revision/CAS/delete-wins.
+   ============================================ */
+const MERGE_EXCLUDE = new Set(['id','revision','updated_at','created_at','deleted_at','student_id','session_number','month_id','roster_id']);
+function mergeNorm(v){ return (v == null || v === '') ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v)); }
+function mergeEq(a,b){ return mergeNorm(a) === mergeNorm(b); }
+// returns { merged (cloud + local-only-changed fields), sameField (bool), applied (field names) }
+function mergeFields(base, local, cloud, table){
+  const fields = new Set([...Object.keys(local||{}), ...Object.keys(cloud||{})].filter(f => !MERGE_EXCLUDE.has(f)));
+  const merged = { ...(cloud||{}) }; const applied = []; let sameField = false;
+  for(const f of fields){
+    const b = base ? base[f] : undefined, l = local ? local[f] : undefined, c = cloud ? cloud[f] : undefined;
+    const lch = !mergeEq(l,b), cch = !mergeEq(c,b);
+    if(lch && cch && !mergeEq(l,c)){ sameField = true; break; }   // same field diverged → unresolvable
+    if(lch && !cch){ merged[f] = l; applied.push(f); }            // only local changed → take local
+    // otherwise keep cloud's value (already in merged)
+  }
+  return { merged, sameField, applied };
+}
+async function removeConflictAndOp(c){
+  await idbDelete('conflicts', c.key);
+  const q = await idbGetAll('sync_queue');
+  for(const op of q){
+    if(op.table === c.table && op.kind === 'content' && op.status === 'conflict' && rowKeyFor(c.table, op.payload) === c.rowKey){
+      await idbDelete('sync_queue', op.localId);
+    }
+  }
+}
+// Resolve stored conflicts: auto-merge different-field ones (re-enqueued on top of current cloud
+// revision); keep same-field ones for manual review. Returns number of merges enqueued.
+async function resolveConflicts(){
+  let enqueued = 0;
+  let list = []; try{ list = await idbGetAll('conflicts'); }catch(e){ return 0; }
+  for(const c of list){
+    if(c.status !== 'conflict') continue;                     // skip legacy_conflict / dead_letter
+    if(c.reason === 'missing'){                               // row deleted remotely → delete-wins
+      try{ await idbDelete(c.table, c.local_payload.id); }catch(e){}
+      await removeConflictAndOp(c);
+      await logCancellation({ localId:null, table:c.table, payload:c.local_payload }, 'superseded_by_delete');
+      continue;
+    }
+    if(c.reason !== 'revision_mismatch' || !c.cloud_row){ continue; } // create_race / legacy / no base → manual review
+    if(!c.base_row){ continue; }                               // no ancestor → cannot safely auto-merge
+    const { merged, sameField, applied } = mergeFields(c.base_row, c.local_payload, c.cloud_row, c.table);
+    if(sameField){ continue; }                                 // same-field clash → KEEP for review, overwrite nothing
+    if(applied.length === 0){                                  // local made no net change beyond cloud → adopt cloud
+      normRev(c.cloud_row); await idbPut(c.table, c.cloud_row); await removeConflictAndOp(c); continue;
+    }
+    // different-field merge → re-submit on top of the current cloud revision
+    normRev(merged);
+    await idbPut(c.table, merged);
+    await idbAddToQueue({ table:c.table, kind:'content', op:'update', payload: merged, matchKey: c.matchKey,
+      base_revision: c.cloud_revision, base_row: c.cloud_row, status:'pending' });
+    await removeConflictAndOp(c);
+    enqueued++;
+  }
+  return enqueued;
 }
 
 // separate read-only pull → cloudMap keyed by natural key (for legacy migration; does NOT touch local dirty rows)
@@ -1523,8 +1637,13 @@ async function syncCycle(){
     // (C) push فقط
     await processSyncQueue();
 
+    // (C2) Phase 4.3: auto field-merge different-field conflicts, then push the merges this cycle.
+    //      Same-field conflicts are left for review (nothing overwritten).
+    try{ const merged = await resolveConflicts(); if(merged > 0) await processSyncQueue(); }catch(e){ console.error('resolveConflicts failed', e); }
+
     // (D) refresh كامل (derivation + skipIfPending) ثم إعادة الرسم
     const result = await refreshFromCloud();
+    await renderSyncAlert();                       // Phase 4.4: surface dead-letters, never silent
     if(typeof refreshCurrentView === 'function') await refreshCurrentView();
     return result || { ok: true };
   } catch(err){
@@ -1591,8 +1710,11 @@ async function writeLocal(table, record, action='upsert', conflictKey=null){
       }catch(e){}
     } else {
       const base = (priorLocal && priorLocal.revision != null) ? String(priorLocal.revision) : null;
+      // base_row = the clean (last-synced) row this edit started from — the common ancestor for
+      // 3-way field-merge in Phase 4.3. Null for first insert / no prior row.
       await idbAddToQueue({ table, kind: 'content', op: base === null ? 'insert' : 'update',
-        payload: record, matchKey, base_revision: base, status: 'pending' });
+        payload: record, matchKey, base_revision: base, base_row: priorLocal ? JSON.parse(JSON.stringify(priorLocal)) : null,
+        status: 'pending' });
     }
   } catch(err){
     console.error('writeLocal failed', table, err);
@@ -1685,6 +1807,8 @@ async function initApp(){
       }
     }
   }catch(e){ /* لا يمنع الإقلاع */ }
+
+  try{ await renderSyncAlert(); }catch(e){} // Phase 4.4: show any pending dead-letters/conflicts on open
 
   try{
     updateConnectionUI();
