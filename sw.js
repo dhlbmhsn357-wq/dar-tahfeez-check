@@ -6,7 +6,7 @@
    مهم: لا نتدخل إطلاقاً في طلبات Supabase أو أي API،
    حتى لا نُرجع بيانات قديمة مخزّنة بدل البيانات الحية.
    ============================================ */
-const CACHE_NAME = 'dar-alarqam-cache-v6';
+const CACHE_NAME = 'dar-alarqam-cache-v7';
 const APP_SHELL = [
   './',
   './index.html'

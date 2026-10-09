@@ -2465,16 +2465,23 @@ async function openAddMonthModal(){
   const allRadio = document.querySelector('input[name="migrateMode"][value="all"]');
   if(allRadio) allRadio.checked = true;
 
-  // تحميل القائمة الأساسية للطلاب وتحديد الكل مبدئياً
+  const searchEl = document.getElementById('migrateSearch');
+  if(searchEl) searchEl.value = '';
+  openModal('modalAddMonth');
+
+  // مهم: قبل بناء القائمة، نزامن roster من السحابة إن كنا أونلاين، حتى لا تُبنى القائمة
+  // من نسخة محلية ناقصة (كان هذا سبب إنشاء شهر بعدد طلاب ناقص على جهاز لم يكمل المزامنة).
+  const hint = document.getElementById('newMonthHint');
+  if(isOnline){
+    if(hint) hint.textContent = 'جارٍ مزامنة قائمة الطلاب…';
+    try{ await requestSync('open-add-month'); }catch(e){ console.error('roster sync for add-month failed', e); }
+  }
+
   migrateRoster = (await idbGetAll('roster')).filter(r => !r.deleted_at);
   migrateRoster.sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
   migrateSelected = new Set(migrateRoster.map(r => r.id));
 
-  const searchEl = document.getElementById('migrateSearch');
-  if(searchEl) searchEl.value = '';
-
   onMigrateModeChange();
-  openModal('modalAddMonth');
 }
 
 function getMigrateMode(){
@@ -2564,6 +2571,22 @@ async function submitAddMonth(){
     return;
   }
 
+  // إصلاح السبب الجذري: ترحيل "الكل" ممنوع من نسخة محلية قد تكون ناقصة (قبل اكتمال المزامنة).
+  // نشترط اتصالاً ونسحب القائمة الكاملة من السحابة لحظتها، وإلا نمنع الإنشاء بدل إنتاج شهر ناقص.
+  let allRosterCloud = null;
+  if(mode === 'all'){
+    if(!isOnline){
+      showToast('ترحيل كل الطلاب يتطلب اتصالاً بالإنترنت لمزامنة القائمة كاملة أولاً. اتصل ثم أعد المحاولة.');
+      return;
+    }
+    const res = await fetchAllRows('roster');
+    if(!res || res.error || !res.data){
+      showToast('تعذّر تحميل قائمة الطلاب كاملة من السحابة — تحقق من الاتصال وحاول مجدداً.');
+      return;
+    }
+    allRosterCloud = res.data.filter(r => !r.deleted_at);
+  }
+
   const newMonth = {
     id: genId(),
     name,
@@ -2579,7 +2602,7 @@ async function submitAddMonth(){
   // نحدد قائمة الطلاب المرشّحين للترحيل حسب الوضع المختار
   let toMigrate = [];
   if(mode === 'all'){
-    toMigrate = (await idbGetAll('roster')).filter(r => !r.deleted_at);
+    toMigrate = allRosterCloud; // القائمة الكاملة من السحابة (لا المحلية الناقصة)
   } else if(mode === 'custom'){
     const all = (await idbGetAll('roster')).filter(r => !r.deleted_at);
     toMigrate = all.filter(r => migrateSelected.has(r.id));
